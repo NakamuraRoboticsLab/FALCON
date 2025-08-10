@@ -208,7 +208,7 @@ robot:
     bias_offset: False
     has_self_collision: True
     has_mesh: False
-    has_jt_limit: False
+    has_jt_limit: True
     has_dof_subset: True
     has_upright_start: True
     has_smpl_pd_offset: False
@@ -225,7 +225,7 @@ robot:
     motion_fps_scale: 1.0
 
     standardize_motion_length: True
-    standardize_motion_length_value: 10 # 10s
+    standardize_motion_length_value: 20 # 10s
 
     reverse_motion: False
 
@@ -286,7 +286,7 @@ robot:
         rot: [1.0, 0.0, 0.0, 0.0] # w x y z
       - joint_name: "head_link"
         parent_name: "torso_link"
-        pos: [0.0, 0.0, 0.35] # need check
+        pos: [0.0, 0.0, 0.65] # need check
         rot: [1.0, 0.0, 0.0, 0.0] # w x y z
 
 
