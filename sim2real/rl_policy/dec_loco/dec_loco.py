@@ -22,11 +22,14 @@ class DecLocomotionPolicy(BasePolicy):
 
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
-        current_obs_buffer_dict["actions"] = self.last_policy_action[:, :self.num_lower_dofs]
+        # Use full previous scaled action over all DoFs to match training obs
+        current_obs_buffer_dict["actions"] = self.scaled_policy_action
         current_obs_buffer_dict["command_lin_vel"] = self.lin_vel_command
         current_obs_buffer_dict["command_ang_vel"] = self.ang_vel_command
         current_obs_buffer_dict["command_stand"] = self.stand_command
         current_obs_buffer_dict["command_waist_dofs"] = self.waist_dofs_command
+        # Add base height command to match ONNX training inputs
+        current_obs_buffer_dict["command_base_height"] = self.base_height_command
         current_obs_buffer_dict["phase_time"] = self._get_obs_phase_time()
         current_obs_buffer_dict["sin_phase"] = np.sin(2 * np.pi * current_obs_buffer_dict["phase_time"])
         current_obs_buffer_dict["cos_phase"] = np.cos(2 * np.pi * current_obs_buffer_dict["phase_time"])
@@ -39,13 +42,24 @@ class DecLocomotionPolicy(BasePolicy):
         obs = self.prepare_obs_for_rl(robot_state_data)
         policy_action = self.policy(obs)
         policy_action = np.clip(policy_action, -100, 100)
-        
-        # Lower body actions
+
+        # Cache raw output
         self.last_policy_action = policy_action.copy()
-        scaled_policy_action = policy_action * self.policy_action_scale
-        # Combine upper body actions
-        scaled_policy_action = np.concatenate([scaled_policy_action, self.ref_upper_dof_pos], axis=1)
-        
+
+        # Handle two export variants
+        if policy_action.shape[1] == self.num_lower_dofs:
+            scaled_policy_action = policy_action * self.policy_action_scale
+            scaled_policy_action = np.concatenate([scaled_policy_action, self.ref_upper_dof_pos], axis=1)
+        elif policy_action.shape[1] == self.num_dofs:
+            scaled_policy_action = policy_action * self.policy_action_scale
+        else:
+            # Fallback to slicing/padding
+            if policy_action.shape[1] > self.num_dofs:
+                scaled_policy_action = (policy_action * self.policy_action_scale)[:, : self.num_dofs]
+            else:
+                pad = np.zeros((policy_action.shape[0], self.num_dofs - policy_action.shape[1]))
+                scaled_policy_action = np.concatenate([policy_action * self.policy_action_scale, pad], axis=1)
+
         return scaled_policy_action
 
     def handle_keyboard_button(self, keycode):

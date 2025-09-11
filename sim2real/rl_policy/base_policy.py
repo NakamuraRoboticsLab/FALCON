@@ -150,8 +150,20 @@ class BasePolicy:
     def _init_rate_handler(self):
         """Initialize ROS handler if enabled."""
         from loguru import logger
+        # Silence verbose rate-limiter warnings if desired
+        try:
+            import logging as _pylogging
+            # Reduce noise from loop_rate_limiters to only errors
+            _pylogging.getLogger("loop_rate_limiters").setLevel(_pylogging.ERROR)
+            _pylogging.getLogger("loop_rate_limiters").propagate = False
+        except Exception:
+            pass
         self.logger = logger
-        self.rate = RateLimiter(self.config.get("rl_rate", 50))
+        # Prefer a quieter RateLimiter if supported; otherwise fall back
+        try:
+            self.rate = RateLimiter(self.config.get("rl_rate", 50), warn=False)  # type: ignore
+        except TypeError:
+            self.rate = RateLimiter(self.config.get("rl_rate", 50))
     
     def _init_input_device(self):
         """Initialize input device (joystick or keyboard)."""
@@ -211,7 +223,17 @@ class BasePolicy:
     
     def setup_policy(self, model_path):
         """Setup ONNX policy model."""
-        self.onnx_policy_session = onnxruntime.InferenceSession(model_path)
+        # Prefer GPU if available; fallback to CPU
+        try:
+            avail = onnxruntime.get_available_providers()
+            providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in avail]
+            if providers:
+                self.onnx_policy_session = onnxruntime.InferenceSession(model_path, providers=providers)
+            else:
+                self.onnx_policy_session = onnxruntime.InferenceSession(model_path)
+        except Exception:
+            # Fallback to default constructor on any issue
+            self.onnx_policy_session = onnxruntime.InferenceSession(model_path)
         input_names = [inp.name for inp in self.onnx_policy_session.get_inputs()]
         output_names = [out.name for out in self.onnx_policy_session.get_outputs()]
         
@@ -298,7 +320,18 @@ class BasePolicy:
             )
             for key in self.obs_buf_dict
         }
+
+        # print("actor_obs shape:", self.obs_buf_dict["actor_obs"].shape)
         
+        # Optional debug: log actor_obs shape once if enabled via config
+        try:
+            if self.config.get("debug_print_actor_obs_shape", False):
+                if not getattr(self, "_printed_actor_shape", False):
+                    self.logger.info(f"actor_obs shape: {self.obs_buf_dict['actor_obs'].shape}")
+                    self._printed_actor_shape = True
+        except Exception:
+            pass
+
         return {"actor_obs": self.obs_buf_dict["actor_obs"].astype(np.float32)}
 
     # ============================================================================
@@ -319,6 +352,17 @@ class BasePolicy:
         """Execute policy action and send commands to robot."""
         # Get robot state using the wrapper
         robot_state_data = self.state_processor.robot_state_data
+        # Wait until any robot state arrives; throttle warning to 1 Hz
+        if robot_state_data is None:
+            now = time.perf_counter()
+            last = getattr(self, "_last_state_warn_ts", 0.0)
+            if now - last > 1.0:
+                try:
+                    self.logger.warning("No robot state received yet. Waiting for state publisher...")
+                except Exception:
+                    pass
+                self._last_state_warn_ts = now
+            return
         
         # Determine target joint positions
         if self.get_ready_state:

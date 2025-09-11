@@ -72,6 +72,19 @@ class BaseSimulator:
         # Enable the elastic band
         if self.config["ENABLE_ELASTIC_BAND"]:
             self.elastic_band = ElasticBand()
+            # Optional overrides from config
+            band_cfg = self.config.get("ELASTIC_BAND", {})
+            if isinstance(band_cfg, dict):
+                self.elastic_band.stiffness = band_cfg.get("stiffness", self.elastic_band.stiffness)
+                self.elastic_band.damping = band_cfg.get("damping", self.elastic_band.damping)
+                if "point" in band_cfg:
+                    try:
+                        self.elastic_band.point = np.array(band_cfg["point"]).astype(float)
+                    except Exception:
+                        pass
+                self.elastic_band.length = band_cfg.get("length", self.elastic_band.length)
+                self.elastic_band.enable = band_cfg.get("enable", self.elastic_band.enable)
+
             band_attached_link_name = self.config.get("BAND_ATTACHED_LINK", "torso_link")
             self.band_attached_link = self.mj_model.body(band_attached_link_name).id
             self.viewer = mujoco.viewer.launch_passive(
