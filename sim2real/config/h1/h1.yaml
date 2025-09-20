@@ -4,7 +4,7 @@ ASSET_ROOT: "../humanoidverse/data/robots/h1"  # 资产根目录
 ASSET_FILE: "../humanoidverse/data/robots/h1/h1.urdf"  # 资产文件
 
 # 训练好的策略模型（如无，可先留空或指向占位路径）
-model_path: "models/comp/new_whole_pd.onnx"
+model_path: "models/comp/new_result_command.onnx"
 
 SDK_TYPE: "unitree"   # "unitree" 或 "booster"
 MOTOR_TYPE: "serial"  # 电机链路: "serial"/"parallel"

@@ -121,8 +121,8 @@ class CompPolicy(LocoManipPolicy):
 
         # 获取 torso link 和末端 frame 的 id
         # torso_frame_name = "torso_link"  # 请替换为你模型实际的 torso link 名称
-        left_ee_frame_name = "left_hand_sphere"   # 请替换为实际左手末端 frame 名称 # left_elbow_ee
-        right_ee_frame_name = "right_hand_sphere" # 请替换为实际右手末端 frame 名称 # right_elbow_ee
+        left_ee_frame_name = "left_elbow_ee"   # 请替换为实际左手末端 frame 名称 # left_elbow_ee
+        right_ee_frame_name = "right_elbow_ee" # 请替换为实际右手末端 frame 名称 # right_elbow_ee
 
         left_ee_frame_id = model.getFrameId(left_ee_frame_name)
         right_ee_frame_id = model.getFrameId(right_ee_frame_name)
