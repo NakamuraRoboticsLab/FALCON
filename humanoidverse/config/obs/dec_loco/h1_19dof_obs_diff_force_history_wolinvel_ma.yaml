@@ -19,7 +19,13 @@ obs:
       actions,
       sin_phase,
       cos_phase,
-      upper_torq,
+      # grav_upper,
+      # lin_kp,
+      # ang_kp,
+      # ee_kp,
+      # upper_torq,
+      # ref_upper_point,
+      # curr_upper_point,
     ]
 
     critic_obs: [
@@ -71,7 +77,7 @@ obs:
       # lin_kp,
       # ang_kp,
       # ee_kp,
-      upper_torq,
+      # upper_torq,
       # ref_upper_point,
       # curr_upper_point,
     ]
