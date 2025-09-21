@@ -49,7 +49,8 @@ class BaseSimulator:
 
         self.force_body_names = ["left_elbow_link", "right_elbow_link"]  # 你要施加力的 link 名
         self.force_body_id = [None] * len(self.force_body_names)  # 初始化
-        self.force_start_time = 15.0  # 10秒后施加力
+        self.force_start_time = 18.0  # 18秒后施加力
+        self.force_duration = 0.05  # 20.0  # 0.05 # 持续20秒
 
         self.init_config()
         self.init_scene()
@@ -169,15 +170,17 @@ class BaseSimulator:
                 self.mj_data.qpos[:3], self.mj_data.qvel[:3]
             )
         # 只在仿真时间大于15秒后施加力
-        if self.mj_data.time >= self.force_start_time and ADD_FORCE:
+        if  self.mj_data.time <= self.force_start_time <= self.mj_data.time + self.force_duration and ADD_FORCE:
             for body_id in self.force_body_ids:
                 r = np.array([0.25, 0.0, 0.0])  # 偏移向量，可为每个 link 单独设置
                 # F = np.array([0.0, 0.0, -30.0])  # 施加的力，可为每个 link 单独设置
                 # 2秒周期的正弦力
+                F_imp = 500.0
                 F_amp = 30.0
                 period = 4.0
-                force = -F_amp * np.sin(2 * np.pi * self.mj_data.time / period)
-                F = np.array([0.0, 0.0, force])
+                # force = -F_amp * np.sin(2 * np.pi * self.mj_data.time / period)
+                force = F_imp
+                F = np.array([force, 0.0, 0.0])
                 torque = np.cross(r, F)
                 wrench = np.concatenate([F, torque])
                 self.mj_data.xfrc_applied[body_id, :] = wrench

@@ -28,6 +28,25 @@ class CompPolicy(LocoManipPolicy):
         self.arm_ik = H1_ArmIK(robot_config=config, unit_test=False, visualization=False)
         self.torque_log = []  # 新增：用于记录实际测量力矩
 
+        self.calc_upper_torque = np.zeros(8)  # 上肢8个关节力矩
+
+    def get_current_obs_buffer_dict(self, robot_state_data):
+        current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
+
+        # # 正确提取上半身关节力矩
+        # tau_est_start = 7 + 2 * self.num_dofs + 6  # tau_est 的起始位置
+        # joint_torque_start = tau_est_start + 6  # 跳过 base 的 6 个力矩分量
+        # # 提取所有关节力矩
+        # all_joint_torques = robot_state_data[:, joint_torque_start : joint_torque_start + self.num_dofs]
+        # # 只取上半身关节的力矩
+        # current_obs_buffer_dict["upper_torq"] = all_joint_torques[:, self.upper_dof_indices]
+
+        current_obs_buffer_dict["upper_torq"] = self.calc_upper_torque.reshape(1, -1)
+
+        print("Measured upper body torques:", current_obs_buffer_dict["upper_torq"])
+
+        return current_obs_buffer_dict
+
     def policy_action(self):
         cmd_q = np.zeros(self.num_dofs)
         cmd_dq = np.zeros(self.num_dofs)
@@ -97,6 +116,8 @@ class CompPolicy(LocoManipPolicy):
         )
         calc_tau += grav_tau_full
 
+        self.calc_upper_torque = calc_tau  # 保存计算的上肢力矩
+
         # calc_tau -= kd * dq_cur
         # cmd_tau[self.upper_dof_indices] = calc_tau
         cmd_tau[self.left_arm_dof_indices] = calc_tau[:4] # 只对左臂关节分配力矩
@@ -146,9 +167,9 @@ class CompPolicy(LocoManipPolicy):
         J_hands_pos = np.vstack([J_left_pos, J_right_pos])
 
         # Define desired stiffness in Cartesian space (can be tuned)
-        kx = 300.0  # Stiffness in x direction
-        ky = 300.0  # Stiffness in y direction
-        kz = 100.0  # Stiffness in z direction
+        kx = 100.0  # Stiffness in x direction
+        ky = 100.0  # Stiffness in y direction
+        kz = 300.0  # Stiffness in z direction
         k_null = 25.0  # Null space stiffness
 
         K_task = np.diag([kx, ky, kz, kx, ky, kz])
@@ -174,7 +195,7 @@ class CompPolicy(LocoManipPolicy):
 
         ee_alpha = 0.7 # 0.3 0.7
         alpha_val = ee_alpha / (1.0 + temp)
-        print(f"cond_number: %.2f, alpha_val: %.4f" % (cond_number, alpha_val))
+        # print(f"cond_number: %.2f, alpha_val: %.4f" % (cond_number, alpha_val))
 
         # stiffness_matrix = self.log_euclidean_blend(stiffness_matrix, mat_pd, alpha=alpha_val)
 
