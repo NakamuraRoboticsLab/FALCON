@@ -4,7 +4,8 @@ ASSET_ROOT: "../humanoidverse/data/robots/h1"  # 资产根目录
 ASSET_FILE: "../humanoidverse/data/robots/h1/h1.urdf"  # 资产文件
 
 # 训练好的策略模型（如无，可先留空或指向占位路径）
-model_path: "models/comp/new_result_command.onnx"
+# model_path: "models/comp/new_result_command.onnx"
+model_path: "models/comp/result_commands.onnx"
 
 SDK_TYPE: "unitree"   # "unitree" 或 "booster"
 MOTOR_TYPE: "serial"  # 电机链路: "serial"/"parallel"
@@ -173,6 +174,7 @@ obs_dict: {
     actions,
     sin_phase,
     cos_phase,
+    upper_torq,  # 上肢关节力矩
   ],
 }
 
@@ -192,6 +194,7 @@ obs_dims: {
   actions: 19,
   sin_phase: 1,
   cos_phase: 1,
+  upper_torq: 8,   # 上肢8DoF
 }
 
 obs_scales: {
@@ -209,4 +212,5 @@ obs_scales: {
   actions: 1.0,
   sin_phase: 1.0,
   cos_phase: 1.0,
+  upper_torq: 1.0,
 }

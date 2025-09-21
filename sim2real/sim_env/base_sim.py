@@ -41,6 +41,7 @@ from sim2real.utils.robot import Robot
 from sim2real.utils.sdk2py_bridge import ElasticBand, create_sdk2py_bridge
 
 RECORD_VIDEO = False  # 控制是否录制视频
+ADD_FORCE = False  # 控制是否施加外力
 
 class BaseSimulator:
     def __init__(self, config):
@@ -48,7 +49,6 @@ class BaseSimulator:
 
         self.force_body_names = ["left_elbow_link", "right_elbow_link"]  # 你要施加力的 link 名
         self.force_body_id = [None] * len(self.force_body_names)  # 初始化
-        self.force_enabled = False  # 新增
         self.force_start_time = 15.0  # 10秒后施加力
 
         self.init_config()
@@ -168,22 +168,22 @@ class BaseSimulator:
             self.mj_data.xfrc_applied[self.band_attached_link, :3] = self.elastic_band.Advance(
                 self.mj_data.qpos[:3], self.mj_data.qvel[:3]
             )
-        # # 只在仿真时间大于15秒后施加力
-        # if self.mj_data.time >= self.force_start_time:
-        #     for body_id in self.force_body_ids:
-        #         r = np.array([0.25, 0.0, 0.0])  # 偏移向量，可为每个 link 单独设置
-        #         # F = np.array([0.0, 0.0, -30.0])  # 施加的力，可为每个 link 单独设置
-        #         # 2秒周期的正弦力
-        #         F_amp = 30.0
-        #         period = 4.0
-        #         force = -F_amp * np.sin(2 * np.pi * self.mj_data.time / period)
-        #         F = np.array([0.0, 0.0, force])
-        #         torque = np.cross(r, F)
-        #         wrench = np.concatenate([F, torque])
-        #         self.mj_data.xfrc_applied[body_id, :] = wrench
-        # else:
-        #     for body_id in self.force_body_ids:
-        #         self.mj_data.xfrc_applied[body_id, :] = np.zeros(6)
+        # 只在仿真时间大于15秒后施加力
+        if self.mj_data.time >= self.force_start_time and ADD_FORCE:
+            for body_id in self.force_body_ids:
+                r = np.array([0.25, 0.0, 0.0])  # 偏移向量，可为每个 link 单独设置
+                # F = np.array([0.0, 0.0, -30.0])  # 施加的力，可为每个 link 单独设置
+                # 2秒周期的正弦力
+                F_amp = 30.0
+                period = 4.0
+                force = -F_amp * np.sin(2 * np.pi * self.mj_data.time / period)
+                F = np.array([0.0, 0.0, force])
+                torque = np.cross(r, F)
+                wrench = np.concatenate([F, torque])
+                self.mj_data.xfrc_applied[body_id, :] = wrench
+        else:
+            for body_id in self.force_body_ids:
+                self.mj_data.xfrc_applied[body_id, :] = np.zeros(6)
 
         self.compute_torques()
         if self.robot_bridge.free_base:

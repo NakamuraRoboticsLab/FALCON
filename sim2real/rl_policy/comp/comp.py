@@ -148,7 +148,7 @@ class CompPolicy(LocoManipPolicy):
         # Define desired stiffness in Cartesian space (can be tuned)
         kx = 300.0  # Stiffness in x direction
         ky = 300.0  # Stiffness in y direction
-        kz = 300.0  # Stiffness in z direction
+        kz = 100.0  # Stiffness in z direction
         k_null = 25.0  # Null space stiffness
 
         K_task = np.diag([kx, ky, kz, kx, ky, kz])
@@ -172,7 +172,7 @@ class CompPolicy(LocoManipPolicy):
 
         temp = np.maximum(cond_number - 30, 1e-6)
 
-        ee_alpha = 1 # 0.3 0.7
+        ee_alpha = 0.7 # 0.3 0.7
         alpha_val = ee_alpha / (1.0 + temp)
         print(f"cond_number: %.2f, alpha_val: %.4f" % (cond_number, alpha_val))
 
