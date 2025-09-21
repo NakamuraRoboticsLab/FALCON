@@ -40,6 +40,7 @@ from sim2real.utils.robot import Robot
 
 from sim2real.utils.sdk2py_bridge import ElasticBand, create_sdk2py_bridge
 
+RECORD_VIDEO = False  # 控制是否录制视频
 
 class BaseSimulator:
     def __init__(self, config):
@@ -192,7 +193,7 @@ class BaseSimulator:
         mujoco.mj_step(self.mj_model, self.mj_data)
 
         # 仿真时间大于15秒且小于等于20秒时录制视频
-        self.record_video = (self.record_start_time <= self.mj_data.time <= self.record_end_time)
+        self.record_video = (self.record_start_time <= self.mj_data.time <= self.record_end_time and RECORD_VIDEO)
 
         # print("Available cameras:", [mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_CAMERA, i) 
         #                     for i in range(self.mj_model.ncam)])

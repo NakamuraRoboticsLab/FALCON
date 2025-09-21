@@ -39,7 +39,10 @@ class CompPolicy(LocoManipPolicy):
         # # Manually set shoulder joints
         # shoulder_joint_indices = [11, 15]
         # for idx in shoulder_joint_indices:
-        #     self.ref_upper_dof_pos[0, idx - 11] = 0.5
+        #     self.ref_upper_dof_pos[0, idx - 11] = -1
+        # elbow_joint_indices = [14, 18]
+        # for idx in elbow_joint_indices:
+        #     self.ref_upper_dof_pos[0, idx - 11] = 1
 
         # print("ref upper body pos:", self.ref_upper_dof_pos)
 
@@ -143,9 +146,9 @@ class CompPolicy(LocoManipPolicy):
         J_hands_pos = np.vstack([J_left_pos, J_right_pos])
 
         # Define desired stiffness in Cartesian space (can be tuned)
-        kx = 200.0  # Stiffness in x direction
-        ky = 100.0  # Stiffness in y direction
-        kz = 100.0  # Stiffness in z direction
+        kx = 300.0  # Stiffness in x direction
+        ky = 300.0  # Stiffness in y direction
+        kz = 300.0  # Stiffness in z direction
         k_null = 25.0  # Null space stiffness
 
         K_task = np.diag([kx, ky, kz, kx, ky, kz])
