@@ -8,9 +8,19 @@ class Robot:
         self.ROBOT_TYPE = config["ROBOT_TYPE"]
         self.MOTOR2JOINT = config["MOTOR2JOINT"]
         self.JOINT2MOTOR = config["JOINT2MOTOR"]
+        self.leg_joint2motor_idx = config["leg_joint2motor_idx"]
+        self.arm_waist_joint2motor_idx = config["arm_waist_joint2motor_idx"]
         self.UNITREE_LEGGED_CONST = config.get("UNITREE_LEGGED_CONST", None)
+        self.JOINT_KP = np.array(config["JOINT_KP"])
+        self.JOINT_KD = np.array(config["JOINT_KD"])
         self.MOTOR_KP = np.array(config["MOTOR_KP"])
         self.MOTOR_KD = np.array(config["MOTOR_KD"])
+
+        for i in range(len(self.JOINT_KP)):
+            idx = self.JOINT2MOTOR[i]
+            self.MOTOR_KP[idx] = self.JOINT_KP[i]
+            self.MOTOR_KD[idx] = self.JOINT_KD[i]
+
         self.WeakMotorJointIndex = config.get("WeakMotorJointIndex", None)
         self.NUM_MOTORS = config["NUM_MOTORS"]
         self.NUM_JOINTS = config["NUM_JOINTS"]

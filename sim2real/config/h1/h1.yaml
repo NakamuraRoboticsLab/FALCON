@@ -12,7 +12,8 @@ MOTOR_TYPE: "serial"  # 电机链路: "serial"/"parallel"
 
 ## 通信/仿真
 DOMAIN_ID: 0
-INTERFACE: "lo"   # 本机 Sim2Sim 用回环口；真机请改为实际网卡名
+# INTERFACE: "lo"   # 本机 Sim2Sim 用回环口；真机请改为实际网卡名
+INTERFACE: "enxc0eac36047db" 
 
 FREE_BASE: False  
 
@@ -44,16 +45,15 @@ use_upper_body_controller: False
 GAIT_PERIOD: 0.8
 DESIRED_BASE_HEIGHT: 0.9
 
-# 关节-电机映射 H1 19DoF：一一对应 need check
-MOTOR2JOINT: [0, 1, 2, 3, 4,
-              5, 6, 7, 8, 9,
-              10, 11, 12, 13, 14,
-              15, 16, 17, 18]
+# 关节-电机映射 H1 19DoF
 
-JOINT2MOTOR: [0, 1, 2, 3, 4,
-              5, 6, 7, 8, 9,
-              10, 11, 12, 13, 14,
-              15, 16, 17, 18]
+MOTOR2JOINT: [6, 7, 8, 1, 2, 3, 10, 0, 5, # not 9th motor
+              4, 9, 15, 16, 17, 18, 11, 12, 13, 14]
+
+JOINT2MOTOR: [7, 3, 4, 5, 10, 8, 0, 1, 2, 11, 6,
+                            16, 17, 18, 19,
+                            12, 13, 14, 15]
+
 
 # Unitree 通信协议常量 # need check
 UNITREE_LEGGED_CONST:
@@ -66,28 +66,51 @@ UNITREE_LEGGED_CONST:
   MODE_PR: 0
 
 # arm KP is 100 in default
-MOTOR_KP: [
-  200, 200, 200, 300, 40,
-  200, 200, 200, 300, 40,
-  300,
-  0, 0, 0, 0,
-  0, 0, 0, 0
-]
-# MOTOR_KP: [
-#   0, 0, 0, 0, 0,
-#   0, 0, 0, 0, 0,
-#   0,
+# JOINT_KP: [
+#   200, 200, 200, 300, 40,
+#   200, 200, 200, 300, 40,
+#   300,
 #   0, 0, 0, 0,
 #   0, 0, 0, 0
 # ]
+JOINT_KP: [
+  0, 0, 0, 0, 0,
+  0, 0, 0, 0, 
+  0, 0, 
+  0, 0, 0, 100,
+  0, 0, 0, 50
+]
 
-MOTOR_KD: [
+JOINT_KD: [
   5, 5, 5, 6, 2,
   5, 5, 5, 6, 2,
-  6,
+  6, 
   2.5, 2.5, 2.5, 2.5,
   2.5, 2.5, 2.5, 2.5
 ]
+
+MOTOR_KP: [
+  0, 0, 0, 0, 0,
+  0, 0, 0, 0, 
+  0, # empty
+  0, 0, 
+  0, 0, 0, 0,
+  0, 0, 0, 0
+]
+
+MOTOR_KD: [
+  5, 5, 5, 6, 2,
+  5, 5, 5, 6, 0, 
+  2,
+  6, 
+  2.5, 2.5, 2.5, 2.5,
+  2.5, 2.5, 2.5, 2.5
+]
+
+arm_waist_joint2motor_idx: [6,
+                            16, 17, 18, 19,
+                            12, 13, 14, 15]
+leg_joint2motor_idx: [7, 3, 4, 5, 10, 8, 0, 1, 2, 11]
 
 # 关节名（与 humanoidverse/config/robot/h1/h1.yaml 一致）
 dof_names: [
