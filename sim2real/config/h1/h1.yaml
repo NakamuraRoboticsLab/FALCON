@@ -6,6 +6,7 @@ ASSET_FILE: "../humanoidverse/data/robots/h1/h1.urdf"  # 资产文件
 # 训练好的策略模型（如无，可先留空或指向占位路径）
 # model_path: "models/comp/new_result_command.onnx"
 model_path: "models/comp/result_commands.onnx"
+# model_path: "models/comp/new_whole_pd.onnx"
 
 SDK_TYPE: "unitree"   # "unitree" 或 "booster"
 MOTOR_TYPE: "serial"  # 电机链路: "serial"/"parallel"
@@ -38,7 +39,7 @@ JOYSTICK_DEVICE: 0
 VISUALIZE_PIN: False
 VISUALIZE_FORCES: False
 
-residual_upper_body_action: False
+residual_upper_body_action: True # in current case, always True
 use_upper_body_controller: False
 
 GAIT_PERIOD: 0.8
