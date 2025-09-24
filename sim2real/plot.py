@@ -40,7 +40,7 @@ axes[0].set_xlabel('Time (s)', fontsize=25)
 axes[0].set_ylabel('Linear Velocity X (m/s)', fontsize=25)
 axes[0].tick_params(axis='both', which='major', labelsize=20)
 axes[0].set_xlim([0, 10])  # 只显示前10秒
-axes[0].set_ylim([-5, 5])  # Y轴范围
+axes[0].set_ylim([-10, 10])  # Y轴范围
 axes[0].set_title('Base Linear Velocity X Tracking', fontsize=25)
 axes[0].legend(fontsize=20)
 axes[0].grid(True, alpha=0.3)
@@ -52,7 +52,7 @@ axes[1].set_xlabel('Time (s)', fontsize=25)
 axes[1].set_ylabel('Linear Velocity Y (m/s)', fontsize=25)
 axes[1].tick_params(axis='both', which='major', labelsize=20)
 axes[1].set_xlim([0, 10])  # 只显示前10秒
-axes[1].set_ylim([-5, 5])  # Y轴范围
+axes[1].set_ylim([-10, 10])  # Y轴范围
 axes[1].set_title('Base Linear Velocity Y Tracking', fontsize=25)
 axes[1].legend(fontsize=20)
 axes[1].grid(True, alpha=0.3)
@@ -75,7 +75,7 @@ axes[0].set_xlabel('Time (s)', fontsize=25)
 axes[0].set_ylabel('Velocity Error X (m/s)', fontsize=25)
 axes[0].tick_params(axis='both', which='major', labelsize=20)
 axes[0].set_xlim([0, 10])  # 只显示前10秒
-axes[0].set_ylim([-5, 5])
+axes[0].set_ylim([-10, 10])
 axes[0].set_title('Linear Velocity Tracking Error (X)', fontsize=25)
 axes[0].grid(True, alpha=0.3)
 
@@ -86,7 +86,7 @@ axes[1].set_xlabel('Time (s)', fontsize=25)
 axes[1].set_ylabel('Velocity Error Y (m/s)', fontsize=25)
 axes[1].tick_params(axis='both', which='major', labelsize=20)
 axes[1].set_xlim([0, 10])  # 只显示前10秒
-axes[1].set_ylim([-5, 5])
+axes[1].set_ylim([-10, 10])
 axes[1].set_title('Linear Velocity Tracking Error (Y)', fontsize=25)
 axes[1].grid(True, alpha=0.3)
 

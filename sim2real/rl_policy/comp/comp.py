@@ -38,7 +38,7 @@ class CompPolicy(LocoManipPolicy):
         self.dt = 1.0 / 50.0  # 控制频率，50Hz
 
         self.start_record_time = None
-        self.record_delay = 5.0  # 5秒后开始记录
+        self.record_delay = 10.0  # 10秒后开始记录
 
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
@@ -65,6 +65,8 @@ class CompPolicy(LocoManipPolicy):
         robot_state_data = self.state_processor.robot_state_data
         # self.robot_state_data_shm[0] = robot_state_data
 
+        current_time = time.time()
+
         # Manually set shoulder joints
         shoulder_joint_indices = [11, 15]
         for idx in shoulder_joint_indices:
@@ -87,6 +89,9 @@ class CompPolicy(LocoManipPolicy):
         else:
             # 3. Policy Action: apply policy action to current joint angles
             q_target = scaled_policy_action + self.default_dof_angles
+            if self.start_record_time is None:
+                self.start_record_time = current_time
+                print("Starting time:", self.start_record_time)
         # import ipdb; ipdb.set_trace()
         # Clip q target
         if self.motor_pos_lower_limit_list and self.motor_pos_upper_limit_list:
@@ -137,15 +142,6 @@ class CompPolicy(LocoManipPolicy):
         cmd_q = q_target[0]
         self.command_sender.send_command(cmd_q, cmd_dq, cmd_tau, q_cur) # for PD control
 
-        current_time = time.time()
-        if self.start_record_time is None:
-            self.start_record_time = current_time
-        # 记录实际测量的上半身关节力矩
-        # 只有过了延迟时间才开始记录
-        if current_time - self.start_record_time >= self.record_delay:
-            measured_tau = robot_state_data[0, 7 + 6 + 2*self.num_dofs + 6 : 19 + 3*self.num_dofs][self.upper_dof_indices]
-            self.torque_log.append(measured_tau.copy())
-
         base_lin_acc = robot_state_data[0, 19 + 3 * self.num_dofs : 19 + 3 * self.num_dofs + 3]  # x, y, z线加速度
         # 通过积分计算base线速度
         if self.prev_time is not None:
@@ -163,7 +159,11 @@ class CompPolicy(LocoManipPolicy):
 
         target_lin_vel = self.lin_vel_command[0, :2]  # 只记录x, y方向的命令
         # 记录数据
-        if current_time - self.start_record_time >= self.record_delay:
+        # 只有过了延迟时间才开始记录
+        if self.start_record_time is not None and current_time - self.start_record_time >= self.record_delay:
+            print("Recording data...")
+            measured_tau = robot_state_data[0, 7 + 6 + 2*self.num_dofs + 6 : 19 + 3*self.num_dofs][self.upper_dof_indices]
+            self.torque_log.append(measured_tau.copy())
             self.base_vel_log.append(base_lin_vel[:2].copy())  # 只记录x, y方向
             self.target_vel_log.append(target_lin_vel.copy())
 
