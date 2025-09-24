@@ -39,6 +39,7 @@ class CompPolicy(LocoManipPolicy):
 
         self.start_record_time = None
         self.record_delay = 10.0  # 10秒后开始记录
+        self.record_duration = 10.0  # 记录10秒的数据
 
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
@@ -160,7 +161,7 @@ class CompPolicy(LocoManipPolicy):
         target_lin_vel = self.lin_vel_command[0, :2]  # 只记录x, y方向的命令
         # 记录数据
         # 只有过了延迟时间才开始记录
-        if self.start_record_time is not None and current_time - self.start_record_time >= self.record_delay:
+        if self.start_record_time is not None and self.record_delay <= current_time - self.start_record_time < self.record_delay + self.record_duration:
             print("Recording data...")
             measured_tau = robot_state_data[0, 7 + 6 + 2*self.num_dofs + 6 : 19 + 3*self.num_dofs][self.upper_dof_indices]
             self.torque_log.append(measured_tau.copy())
