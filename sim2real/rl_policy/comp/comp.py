@@ -27,8 +27,18 @@ class CompPolicy(LocoManipPolicy):
 
         self.arm_ik = H1_ArmIK(robot_config=config, unit_test=False, visualization=False)
         self.torque_log = []  # 新增：用于记录实际测量力矩
+        self.base_vel_log = []  # 实测base线速度
+        self.target_vel_log = []  # 目标线速度命令
 
         self.calc_upper_torque = np.zeros(8)  # 上肢8个关节力矩
+
+        # 新增：用于积分计算base线速度
+        self.integrated_base_vel = np.zeros(3)  # x, y, z线速度的积分值
+        self.prev_time = None  # 记录上一次的时间戳
+        self.dt = 1.0 / 50.0  # 控制频率，50Hz
+
+        self.start_record_time = None
+        self.record_delay = 5.0  # 5秒后开始记录
 
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
@@ -43,7 +53,7 @@ class CompPolicy(LocoManipPolicy):
 
         current_obs_buffer_dict["upper_torq"] = self.calc_upper_torque.reshape(1, -1)
 
-        print("Measured upper body torques:", current_obs_buffer_dict["upper_torq"])
+        # print("Measured upper body torques:", current_obs_buffer_dict["upper_torq"])
 
         return current_obs_buffer_dict
 
@@ -55,13 +65,13 @@ class CompPolicy(LocoManipPolicy):
         robot_state_data = self.state_processor.robot_state_data
         # self.robot_state_data_shm[0] = robot_state_data
 
-        # # Manually set shoulder joints
-        # shoulder_joint_indices = [11, 15]
-        # for idx in shoulder_joint_indices:
-        #     self.ref_upper_dof_pos[0, idx - 11] = -1
-        # elbow_joint_indices = [14, 18]
-        # for idx in elbow_joint_indices:
-        #     self.ref_upper_dof_pos[0, idx - 11] = 1
+        # Manually set shoulder joints
+        shoulder_joint_indices = [11, 15]
+        for idx in shoulder_joint_indices:
+            self.ref_upper_dof_pos[0, idx - 11] = -0.5
+        elbow_joint_indices = [14, 18]
+        for idx in elbow_joint_indices:
+            self.ref_upper_dof_pos[0, idx - 11] = 0.5
 
         # print("ref upper body pos:", self.ref_upper_dof_pos)
 
@@ -120,16 +130,44 @@ class CompPolicy(LocoManipPolicy):
 
         # calc_tau -= kd * dq_cur
         # cmd_tau[self.upper_dof_indices] = calc_tau
-        cmd_tau[self.left_arm_dof_indices] = calc_tau[:4] # 只对左臂关节分配力矩
+        cmd_tau[self.left_arm_dof_indices] = calc_tau[:4] # 只对左臂关节分配力矩 # calc_tau[:4]
         cmd_tau[self.right_arm_dof_indices] = calc_tau[4:] # 只对右臂关节分配力矩 # calc_tau_pd[4:]
 
         # Send command
         cmd_q = q_target[0]
         self.command_sender.send_command(cmd_q, cmd_dq, cmd_tau, q_cur) # for PD control
 
+        current_time = time.time()
+        if self.start_record_time is None:
+            self.start_record_time = current_time
         # 记录实际测量的上半身关节力矩
-        measured_tau = robot_state_data[0, 7 + 6 + 2*self.num_dofs + 6 : 21 + 3*self.num_dofs][self.upper_dof_indices]
-        self.torque_log.append(measured_tau.copy())
+        # 只有过了延迟时间才开始记录
+        if current_time - self.start_record_time >= self.record_delay:
+            measured_tau = robot_state_data[0, 7 + 6 + 2*self.num_dofs + 6 : 19 + 3*self.num_dofs][self.upper_dof_indices]
+            self.torque_log.append(measured_tau.copy())
+
+        base_lin_acc = robot_state_data[0, 19 + 3 * self.num_dofs : 19 + 3 * self.num_dofs + 3]  # x, y, z线加速度
+        # 通过积分计算base线速度
+        if self.prev_time is not None:
+            actual_dt = current_time - self.prev_time
+            # 使用实际的时间步长进行积分（梯形积分）
+            self.integrated_base_vel += base_lin_acc * actual_dt
+        else:
+            # 第一次调用，使用固定时间步长
+            self.integrated_base_vel += base_lin_acc * self.dt
+        
+        self.prev_time = current_time
+
+        # 使用积分得到的base线速度
+        base_lin_vel = self.integrated_base_vel
+
+        target_lin_vel = self.lin_vel_command[0, :2]  # 只记录x, y方向的命令
+        # 记录数据
+        if current_time - self.start_record_time >= self.record_delay:
+            self.base_vel_log.append(base_lin_vel[:2].copy())  # 只记录x, y方向
+            self.target_vel_log.append(target_lin_vel.copy())
+
+        # print("base_lin_vel:", base_lin_vel)
 
     #################################
     # Compliance control functions #
@@ -249,3 +287,7 @@ if __name__ == "__main__":
 
     torque_arr = np.array(policy.torque_log)  # shape: [steps, num_upper_dofs]
     np.save("upper_body_measured_torque_log.npy", torque_arr)
+    base_vel_arr = np.array(policy.base_vel_log)  # shape: [steps, 2]
+    np.save("upper_body_base_velocity_log.npy", base_vel_arr)
+    target_vel_arr = np.array(policy.target_vel_log)  # shape: [steps, 2]
+    np.save("upper_body_target_velocity_log.npy", target_vel_arr)
