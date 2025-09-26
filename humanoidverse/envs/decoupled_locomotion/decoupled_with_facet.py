@@ -206,7 +206,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         """更新阻抗控制 (Update impedance control)"""
 
         # 更新控制指令 (Update control commands)
-        self.update_impedance_command()
+        # self.update_impedance_command()
 
         # 滚动更新参考轨迹缓冲区 (Rolling update of reference trajectory buffer)
         # 将历史数据向前滚动，为新数据腾出空间 (Roll historical data forward)
@@ -217,30 +217,18 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         # 更新当前状态到缓冲区首位 (Update current state to buffer front)
         # this part need check
-        if (hasattr(self, 'simulator') and
-                hasattr(self.simulator, 'robot_root_states')):
+        if (hasattr(self, 'simulator')):
             # 使用模拟器的当前状态 (Use current state from simulator)
             # current_pos = self.simulator.robot_root_states[:, :3]
             current_pos = self.simulator._rigid_body_pos[:, self.torso_index, :]
-            
-            # current_vel = self.simulator.robot_root_states[:, 7:10]
             current_vel = self.simulator._rigid_body_vel[:, self.torso_index, :]
-            # current_quat = self.simulator.robot_root_states[:, 3:7]
-            
-            # 计算当前偏航角 (Calculate current yaw angle)
-            # qw, qx, qy, qz = (current_quat[:, 0], current_quat[:, 1],
-            #                   current_quat[:, 2], current_quat[:, 3])
-            # current_yaw = torch.atan2(2.0 * (qz * qy + qw * qx),
-            #                           1.0 - 2.0 * (qx**2 + qy**2))
             
             forward = quat_apply(self.base_quat, self.forward_vec)
             current_yaw = torch.atan2(forward[:, 1], forward[:, 0])
             
             # 计算当前偏航角速度 (Calculate current yaw velocity)
             # 使用角速度的Z分量作为偏航角速度
-            # Use Z component of angular velocity as yaw velocity
             current_ang_vel = self.simulator._rigid_body_ang_vel[:, self.torso_index, :]
-            # current_ang_vel = self.simulator.robot_root_states[:, 10:13]
             current_yaw_vel = current_ang_vel[:, 2]  # Z component
             
             # 更新当前状态到缓冲区第一个位置 (Update current state to first position)
@@ -313,27 +301,15 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # should be used in reward function for tracking
         # 使用世界坐标系的线速度和角速度更新EMA
         # Update EMA with world frame linear and angular velocities
-        # world_lin_vel = self.simulator.robot_root_states[:, 7:10]
-        # world_ang_vel = self.simulator.robot_root_states[:, 10:13]
         world_lin_vel = self.simulator._rigid_body_vel[:, self.torso_index, :]
         world_ang_vel = self.simulator._rigid_body_ang_vel[:, self.torso_index, :]
 
         self.lin_vel_ema.update(world_lin_vel)
         self.ang_vel_ema.update(world_ang_vel)
 
-        # # use pos or vel to switch stance and tapping mode
-        # if ((torch.abs(self.commands[:, 0]) < 0.08) & (torch.abs(self.commands[:, 1]) < 0.08) & (torch.abs(self.commands[:, 2]) < 0.1)).any():
-        #     self.commands[:, 4] = 0.0
-        # else:
-        #     self.commands[:, 4] = 1.0
-
         self.commands[:, 0] *= self.commands[:, 4]
         self.commands[:, 1] *= self.commands[:, 4]
         self.commands[:, 2] *= self.commands[:, 4]
-
-        # print("surrogate_lin_vel_first:", self.surrogate_lin_vel_target[:, 0])
-        # print("surrogate_lin_vel:", surr_vel_world_weighted[:, :3])
-        # print("linear_velocity_ema:", self.lin_vel_ema.ema[:, 0])
 
     # should put it in initial domain randomization? 
     def update_impedance_command(self): 
@@ -353,20 +329,6 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             probs = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device) # [0.4, 0.5, 0.1, 0.0]
             mode = torch.multinomial(
                 probs, num_samples=len(sample_ids), replacement=True)
-
-            # 分配不同模式 (Assign different modes)
-            # self.sample_command_world(sample_ids[mode == 0])
-            # self.sample_command_setvel(sample_ids[mode == 1])
-            # self.sample_command_compliant(sample_ids[mode == 2])
-            # self.sample_command_large(sample_ids[mode == 3])
-            # print("sample_ids:", sample_ids)
-
-            # # Set target pos and rot as to reference root position
-            # # if use randomize, comment out
-            # self.command_setpos_w = self.ref_root_pos
-            # # Convert reference quaternion to RPY and set command rotation
-            # ref_rpy = get_euler_xyz_in_tensor(self.ref_root_rot)
-            # self.command_setrpy_w = ref_rpy
 
         self.impedance_command_time += 1
 
@@ -480,12 +442,6 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         offset = torch.zeros(len(env_ids), 3, device=self.device)
         offset[:, 0].uniform_(-1.0, 1.0)  # X方向前进 (X direction forward)
         offset[:, 1].uniform_(-0.6, 0.6)  # Y方向左右 (Y direction left/right)
-
-        # when stance or tapping, no offset
-        # used for training mode
-        # self.tapping_in_place[env_ids, 0] = (
-        #     torch.rand(len(env_ids), device=self.device) >
-        #     self.tapping_in_place_prob).float()
 
         # 使用模拟器的正确根状态 (Use correct root states from simulator)
         # current_pos = self.simulator.robot_root_states[env_ids, :3]
