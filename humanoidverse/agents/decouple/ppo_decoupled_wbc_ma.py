@@ -24,6 +24,8 @@ from rich.panel import Panel
 from rich.live import Live
 console = Console()
 
+NO_DL_REG = False  # 是否使用深度学习正则化
+
 class PPOMultiActorCritic(PPO):
     def __init__(self,
                  env: BaseTask,
@@ -67,13 +69,13 @@ class PPOMultiActorCritic(PPO):
 
         self.mc_weight = 0.8 # TODO: hardcoded for now, can be made configurable later
 
-        humanoidverse_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        checkpoint_path = os.path.join(humanoidverse_ROOT_DIR, \
-                                       "../../logs/h1_19dof_falcon/new_whole_pd", "model_20000.pt") # 预训练模型路径
-                                    #    "../../logs/h1_19dof_falcon/whole_body_pd", "model_20000.pt") # 预训练模型路径
-                                    #    "../../logs/h1_19dof_falcon/whole_body_pd_extra_obs", "model_20000.pt") # 预训练模型路径
-
-        self.external_actor = self.create_external_actor(checkpoint_path)
+        if not NO_DL_REG:
+            humanoidverse_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            checkpoint_path = os.path.join(humanoidverse_ROOT_DIR, \
+                                        "../../logs/h1_19dof_falcon/new_whole_pd", "model_20000.pt") # 预训练模型路径
+                                        #    "../../logs/h1_19dof_falcon/whole_body_pd", "model_20000.pt") # 预训练模型路径
+                                        #    "../../logs/h1_19dof_falcon/whole_body_pd_extra_obs", "model_20000.pt") # 预训练模型路径
+            self.external_actor = self.create_external_actor(checkpoint_path)
 
         self.kl_coef_start = self.env.config.regularization.kl_beta_init  # Initial KL coefficient
         self.kl_coef_end = self.env.config.regularization.kl_beta_final   # Final KL coefficient
@@ -420,16 +422,17 @@ class PPOMultiActorCritic(PPO):
         
         critic_loss = self.value_loss_coef * value_loss
 
-        # In _compute_ppo_loss, update kl_coef using linear annealing
-        if key == 'lower_body':
-            # Anneal kl_coef linearly from start to end over anneal_steps
-            progress = min(self.current_learning_iteration / self.kl_coef_anneal_steps, 1.0)
-            self.kl_coef = self.kl_coef_start - progress * (self.kl_coef_start - self.kl_coef_end)
-            
-            # 计算 KL 散度
-            kl_div = self.compute_kl_divergence_lower_body(self.external_actor, policy_state_dict["actor_obs"])
-            kl_loss = kl_div.mean() * self.kl_coef
-            actor_loss = actor_loss + kl_loss
+        if not NO_DL_REG:
+            # In _compute_ppo_loss, update kl_coef using linear annealing
+            if key == 'lower_body':
+                # Anneal kl_coef linearly from start to end over anneal_steps
+                progress = min(self.current_learning_iteration / self.kl_coef_anneal_steps, 1.0)
+                self.kl_coef = self.kl_coef_start - progress * (self.kl_coef_start - self.kl_coef_end)
+                
+                # 计算 KL 散度
+                kl_div = self.compute_kl_divergence_lower_body(self.external_actor, policy_state_dict["actor_obs"])
+                kl_loss = kl_div.mean() * self.kl_coef
+                actor_loss = actor_loss + kl_loss
 
         return actor_loss, critic_loss, value_loss, surrogate_loss, entropy_loss, kl_mean
 

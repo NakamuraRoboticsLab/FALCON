@@ -148,7 +148,7 @@ robot:
   ]
 
   control:
-    control_type: C # C P
+    control_type: P # C P
     # PD Drive parameters:
     stiffness: # [N*m/rad]
       hip_yaw: 200
@@ -275,7 +275,7 @@ robot:
     left_foot_name: 'left_ankle_link'
 
 
-    nums_extend_bodies: 2 # 3
+    nums_extend_bodies: 4 # 3
     extend_config:
       - joint_name: "left_hand_link"
         parent_name: "left_elbow_link"

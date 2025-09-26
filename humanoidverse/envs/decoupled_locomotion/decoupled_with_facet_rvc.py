@@ -515,13 +515,6 @@ class LeggedRobotDecoupledLocomotionWithFACETRVC(LeggedRobotDecoupledLocomotionW
         
     ########################### RVC REWARDS ###########################
 
-    def _reward_upper_ref_close(self):
-        err = torch.sum(torch.square(self.config.robot.control.action_scale * \
-                                      self.actions[:, self.upper_dof_indices] + \
-                                        self.default_dof_pos[:, self.upper_dof_indices] - self.ref_upper_dof_pos), dim=1)
-        reward = torch.exp(-err / 0.25)
-
-        return reward
     
     ######################### Observations #########################
     
@@ -539,9 +532,6 @@ class LeggedRobotDecoupledLocomotionWithFACETRVC(LeggedRobotDecoupledLocomotionW
         min_kp, max_kp = self.ee_kp_range
         ee_kp_norm = (self.ee_kp - min_kp) / (max_kp - min_kp + 1e-8)
         return ee_kp_norm
-
-    def _get_obs_upper_torq(self):
-        return self.upper_torques
 
     def _get_obs_torso_stiff(self):
         """

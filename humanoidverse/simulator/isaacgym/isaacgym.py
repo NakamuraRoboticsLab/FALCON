@@ -14,6 +14,7 @@ from rich.progress import Progress
 from humanoidverse.simulator.base_simulator.base_simulator import BaseSimulator
 from pathlib import Path
 
+RECORD_ON = False
 
 class IsaacGym(BaseSimulator):
     def __init__(self, config, device):
@@ -21,10 +22,11 @@ class IsaacGym(BaseSimulator):
         self.simulator_config = config.simulator.config
         self.robot_config = config.robot
         self.visualize_viewer = False
-        self.auto_record_start_time = None
-        self.auto_record_duration = 5 # 8  # seconds, set as needed
+        if RECORD_ON:
+            self.auto_record_start_time = None
+            self.auto_record_duration = 5 # 8  # seconds, set as needed
+            self.auto_record_trigger_time = 9  # seconds, set your desired start time
         self.sim_step_count = 0
-        self.auto_record_trigger_time = 9  # seconds, set your desired start time
         self.robot_pos = None
         self.robot_quat = None
         
@@ -734,14 +736,15 @@ class IsaacGym(BaseSimulator):
             self.gym.poll_viewer_events(self.viewer)
 
         # 自动录制逻辑：在指定时间开始录制
-        if self.auto_record_start_time is None and current_sim_time >= self.auto_record_trigger_time:
-            self.auto_record_start_time = current_sim_time
-            self.user_is_recording = True
-            self.user_recording_state_change = True
-        elif self.auto_record_start_time is not None and current_sim_time - self.auto_record_start_time > self.auto_record_duration:
-            if self.user_is_recording:
-                self.user_is_recording = False
+        if RECORD_ON: 
+            if self.auto_record_start_time is None and current_sim_time >= self.auto_record_trigger_time:
+                self.auto_record_start_time = current_sim_time
+                self.user_is_recording = True
                 self.user_recording_state_change = True
+            elif self.auto_record_start_time is not None and current_sim_time - self.auto_record_start_time > self.auto_record_duration:
+                if self.user_is_recording:
+                    self.user_is_recording = False
+                    self.user_recording_state_change = True
 
         if self.visualize_viewer:
         # https://github.com/NVlabs/ProtoMotions/blob/94059259ba2b596bf908828cc04e8fc6ff901114/phys_anim/envs/base_interface/isaacgym.py#L198

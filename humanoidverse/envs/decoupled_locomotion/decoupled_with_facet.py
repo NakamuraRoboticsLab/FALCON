@@ -98,6 +98,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.max_vel_xy = self.config.facet_params.max_vel_xy
         self.upper_torques = torch.zeros(self.num_envs, self.config.robot.upper_body_actions_dim, device=self.device)
 
+        self.ee_virtual_mass = self.config.facet_params.ee_virtual_mass
+        self.max_ee_vel = self.config.facet_params.max_ee_vel
+
         # 代理目标时间步 (Surrogate target time steps)
         # self.surr_steps = [16, 24, 32]  # 可配置的多时间步 (Configurable)
         self.surr_steps = [8, 16, 24] # should use current step? 
@@ -186,17 +189,45 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         self.commands_x = torch.empty(self.num_envs, device=self.device).uniform_(-2, 2)
         self.commands_y = torch.empty(self.num_envs, device=self.device).uniform_(-2, 2)
+
+        self._init_ee_impedance_control()
+
+    def _init_ee_impedance_control(self):
+        """初始化EE阻抗控制系统 (Initialize EE impedance control system)"""
+        
+        # EE阻抗控制参数 (EE impedance control parameters)
+        self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0  # [left, right] x [x, y, z]
+        
+        # EE目标状态 (EE target states)
+        self.command_ee_setpos_w = torch.zeros(self.num_envs, 2, 3, device=self.device)  # [left, right] positions
+        self.set_ee_linvel = torch.zeros(self.num_envs, 2, 3, device=self.device)        # [left, right] velocities
+        
+        # EE虚拟动力学参数 (EE virtual dynamics parameters)
+        self.ee_virtual_mass_tensor = torch.ones(self.num_envs, 2, 1, device=self.device) * self.ee_virtual_mass
+        
+        # EE外力状态 (EE external force states)
+        self.ee_force_ext_w = torch.zeros(self.num_envs, 2, 3, device=self.device)
+        
+        # EE参考轨迹积分缓冲区 (EE reference trajectory integration buffers)
+        bshape = (self.num_envs, self.temporal_smoothing + 1, 2, 3)  # [envs, time, left/right, xyz]
+        self.ref_ee_lin_vel = torch.zeros(*bshape, device=self.device)
+        self.ref_ee_pos = torch.zeros(*bshape, device=self.device)
+        self.ref_ee_lin_acc = torch.zeros(*bshape, device=self.device)
+        
+        # EE代理位置和速度目标 (EE surrogate position and velocity targets)
+        self.surrogate_ee_pos_target = torch.zeros(self.num_envs, len(self.surr_steps), 2, 3, device=self.device)
+        self.surrogate_ee_lin_vel_target = torch.zeros(self.num_envs, len(self.surr_steps), 2, 3, device=self.device)
         
     
-    # def step(self, actor_state):
-    #     """环境步进 (Environment step)"""
+    def step(self, actor_state):
+        """环境步进 (Environment step)"""
 
-    #     self.update_controller()
+        self.update_controller()
 
-    #     # 执行父类步进 (Execute parent class step)
-    #     result = super().step(actor_state)
-    #     # print("upper_torques:", self.upper_torques)
-    #     return result
+        # 执行父类步进 (Execute parent class step)
+        result = super().step(actor_state)
+        # print("upper_torques:", self.upper_torques)
+        return result
 
     def update_controller(self):
         """更新控制器 (Update controller)"""
@@ -214,6 +245,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.ref_pos_w[:, :-1] = self.ref_pos_w[:, :-1].roll(1, dims=1)
         self.ref_yaw_w[:, :-1] = self.ref_yaw_w[:, :-1].roll(1, dims=1)
         self.ref_yaw_vel_w[:, :-1] = self.ref_yaw_vel_w[:, :-1].roll(1, dims=1)
+        # 滚动更新EE参考轨迹缓冲区 (Rolling update EE reference trajectory buffer)
+        self.ref_ee_lin_vel[:, :-1] = self.ref_ee_lin_vel[:, :-1].roll(1, dims=1)
+        self.ref_ee_pos[:, :-1] = self.ref_ee_pos[:, :-1].roll(1, dims=1)
 
         # 更新当前状态到缓冲区首位 (Update current state to buffer front)
         # this part need check
@@ -237,8 +271,20 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             self.ref_yaw_w[:, 0] = current_yaw.unsqueeze(1)
             self.ref_yaw_vel_w[:, 0] = current_yaw_vel.unsqueeze(1)
 
+            # 更新当前EE状态到缓冲区首位 (Update current EE state to buffer front)
+            current_ee_pos = self.marker_coords[:, -4:-2, :]  # 左右手
+            
+            current_ee_vel = torch.stack([
+                self.simulator._rigid_body_vel[:, self.left_hand_link_index, :],   # left EE
+                self.simulator._rigid_body_vel[:, self.right_hand_link_index, :]   # right EE
+            ], dim=1)  # (num_envs, 2, 3)
+            
+            self.ref_ee_pos[:, 0] = current_ee_pos
+            self.ref_ee_lin_vel[:, 0] = current_ee_vel
+
         # 积分参考轨迹 (Integrate reference trajectory)
         self._integrate_reference_trajectory()
+        self._integrate_ee_reference_trajectory()
 
         # 更新代理位置目标 (Update surrogate position target)
         # 使用多个时间步的参考轨迹位置作为代理目标 (Use multi-time step reference positions)
@@ -296,6 +342,17 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # self.commands[:, 2:3] = self.surr_yaw_vel_base
         # self.commands[:, 2:3] = surr_yaw_vel_world_weighted
 
+        # 更新EE代理目标 (Update EE surrogate targets)
+        self.surrogate_ee_pos_target = self.ref_ee_pos[:, self.surr_steps]      # (num_envs, surr_steps, 2, 3)
+        self.surrogate_ee_lin_vel_target = self.ref_ee_lin_vel[:, self.surr_steps]  # (num_envs, surr_steps, 2, 3)
+        
+        # 更新命令速度和EE目标 (Update command velocities and EE targets)
+        surr_vel_world = self.surrogate_lin_vel_target
+        surr_yaw_vel_world = self.surrogate_yaw_vel_target
+        weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
+        weights = weights[:len(self.surr_steps)]
+        weights = weights / weights.sum()
+
         # 更新EMA滤波器 (Update EMA filters)
         # 使用世界坐标系的速度 (Use world frame velocities)
         # should be used in reward function for tracking
@@ -310,6 +367,38 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.commands[:, 0] *= self.commands[:, 4]
         self.commands[:, 1] *= self.commands[:, 4]
         self.commands[:, 2] *= self.commands[:, 4]
+
+    def _integrate_ee_reference_trajectory(self):
+        """积分EE参考轨迹 (Integrate EE reference trajectory)"""
+        dt = self.dt  # 0.02s
+        
+        # 计算期望EE位置 (Calculate desired EE position)
+        # setpos_w shape: (num_envs, 1, 2, 3)
+        self.command_ee_setpos_w = self.ref_body_pos_extend[:, -4:-2, :]
+        setpos_w = self.command_ee_setpos_w.unsqueeze(1)
+        
+        # 计算EE参考加速度 (Calculate EE reference acceleration)
+        self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0
+        self.ee_lin_kp[:, 0, :] *= self.ee_kp[:, :3]  # left hand
+        self.ee_lin_kp[:, 1, :] *= self.ee_kp[:, 3:]  # right hand
+
+        self.ee_force_ext_w[:, 0, :] = self.left_ee_apply_force
+        self.ee_force_ext_w[:, 1, :] = self.right_ee_apply_force
+
+        ref_ee_acc_w = (
+            self.ee_lin_kp.unsqueeze(1) * (setpos_w - self.ref_ee_pos) +
+            saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
+        ) / self.ee_virtual_mass_tensor.unsqueeze(1)
+        
+        # 存储当前时间步的参考加速度 (Store current timestep reference acceleration)
+        self.ref_ee_lin_acc = ref_ee_acc_w
+        
+        # 积分EE速度和位置 (Integrate EE velocity and position)
+        ref_ee_vel_w = self.ref_ee_lin_vel + ref_ee_acc_w * dt
+        ref_ee_vel_w = torch.clamp(ref_ee_vel_w, -self.max_ee_vel, self.max_ee_vel)
+        
+        self.ref_ee_lin_vel = ref_ee_vel_w
+        self.ref_ee_pos.add_(self.ref_ee_lin_vel * dt)
 
     # should put it in initial domain randomization? 
     def update_impedance_command(self): 
@@ -726,6 +815,79 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         reward = torch.exp(-error_l2 / 0.25)  # (num_envs,)
         return reward
 
+    def _reward_ee_impedance_pos_tracking(self):
+        """
+        EE阻抗位置跟踪奖励 (EE impedance position tracking reward)
+        
+        Returns:
+            EE位置跟踪奖励 (EE position tracking reward)
+        """
+        if (not hasattr(self, 'surrogate_ee_pos_target') or
+                not hasattr(self, 'simulator')):
+            return torch.zeros(self.num_envs, device=self.device)
+        
+        # 获取当前EE位置 (Get current EE position)
+        current_ee_pos = torch.stack([
+            self.simulator._rigid_body_pos[:, self.left_hand_link_index, :],
+            self.simulator._rigid_body_pos[:, self.right_hand_link_index, :]
+        ], dim=1)  # (num_envs, 2, 3)
+        
+        # 使用加权多时间步误差 (Use weighted multi-step error)
+        weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
+        multi_step_errors = []
+        
+        for i in range(len(self.surr_steps)):
+            # surrogate_ee_pos_target: (num_envs, surr_steps, 2, 3)
+            diff = current_ee_pos - self.surrogate_ee_pos_target[:, i]  # (num_envs, 2, 3)
+            step_error = diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
+            weight = weights[i] if i < len(weights) else 0.01
+            multi_step_errors.append(step_error * weight)
+        
+        pos_error_l2 = torch.stack(multi_step_errors, dim=1).sum(dim=1)  # (num_envs,)
+        
+        # 使用指数衰减奖励函数 (Use exponential decay reward function)
+        base_reward = torch.exp(-pos_error_l2 / 0.5)  # 适当调整标准差
+        reward = base_reward * self.commands[:, 4]  # 只在行走模式下应用
+        
+        return reward
+    
+    def _reward_ee_impedance_vel_tracking(self):
+        """
+        EE阻抗速度跟踪奖励 (EE impedance velocity tracking reward)
+        
+        Returns:
+            EE速度跟踪奖励 (EE velocity tracking reward)
+        """
+        if (not hasattr(self, 'surrogate_ee_lin_vel_target') or
+                not hasattr(self, 'simulator')):
+            return torch.zeros(self.num_envs, device=self.device)
+        
+        # 获取当前EE速度 (Get current EE velocity)
+        current_ee_vel = torch.stack([
+            self.simulator._rigid_body_vel[:, self.left_hand_link_index, :],
+            self.simulator._rigid_body_vel[:, self.right_hand_link_index, :]
+        ], dim=1)  # (num_envs, 2, 3)
+        
+        # 使用第一个代理时间步的速度目标 (Use first surrogate time step velocity target)
+        target_ee_vel = self.surrogate_ee_lin_vel_target[:, 0]  # (num_envs, 2, 3)
+        
+        # 计算速度误差 (Calculate velocity error)
+        vel_diff = current_ee_vel - target_ee_vel  # (num_envs, 2, 3)
+        error_l2 = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,)
+        
+        # 使用指数衰减奖励函数 (Use exponential decay reward function)
+        reward = torch.exp(-error_l2 / 0.25)
+        
+        return reward
+    
+    def _reward_upper_ref_close(self):
+        err = torch.sum(torch.square(self.config.robot.control.action_scale * \
+                                      self.actions[:, self.upper_dof_indices] + \
+                                        self.default_dof_pos[:, self.upper_dof_indices] - self.ref_upper_dof_pos), dim=1)
+        reward = torch.exp(-err / 0.25)
+
+        return reward
+    
     def _reward_force_resistance(self):
         """
         力干扰抵抗奖励 (Force disturbance resistance reward)
