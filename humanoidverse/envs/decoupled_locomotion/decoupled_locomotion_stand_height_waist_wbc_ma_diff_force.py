@@ -786,9 +786,10 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBCForce(LeggedRobotDecoupledLoc
         return torch.sum(end_effector_ang_acc_norm, dim=1)
 
     def _reward_tracking_upper_point_pos(self):
+        # only elbow version
         # Track the position of the hands
-        act_ext = self.marker_coords[:, -4:, :]  # (num_envs, 4, 3)
-        ref_ext = self.ref_body_pos_extend[:, -4:, :]  # (num_envs, 4, 3)
+        act_ext = self.marker_coords[:, -2:, :]  # (num_envs, 2, 3)
+        ref_ext = self.ref_body_pos_extend[:, -2:, :]  # (num_envs, 2, 3)
         # sum squared error over both the hand axis and the xyz axis -> (num_envs,)
         hand_pos_error = torch.sum(torch.square(act_ext - ref_ext), dim=(1, 2))
 

@@ -839,6 +839,8 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             step_error = diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
             weight = weights[i] if i < len(weights) else 0.01
             multi_step_errors.append(step_error * weight)
+
+        # single_step_error = (current_ee_pos - self.surrogate_ee_pos_target[:, 0]).square().sum(dim=-1).sum(dim=-1)
         
         pos_error_l2 = torch.stack(multi_step_errors, dim=1).sum(dim=1)  # (num_envs,)
         
@@ -871,6 +873,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # 使用指数衰减奖励函数 (Use exponential decay reward function)
         reward = torch.exp(-error_l2 / 0.25)
+        reward += -0.5 * error_l2
         
         return reward
     
@@ -1176,5 +1179,8 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
     def _get_obs_upper_torq(self):
         return self.upper_torques
+
+    def _get_obs_ee_kp(self):
+        return self.ee_kp
 
     
