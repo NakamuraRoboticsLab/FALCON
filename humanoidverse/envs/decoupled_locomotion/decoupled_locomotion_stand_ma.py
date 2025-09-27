@@ -100,6 +100,7 @@ class LeggedRobotDecoupledLocomotionStance(LeggedRobotLocomotion):
                                          dtype=torch.float, 
                                          device=self.device, 
                                          requires_grad=False) # extend
+            self.marker_vels = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
             self.ref_body_pos_extend = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
             self.dif_global_body_pos = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
 

@@ -197,6 +197,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # EE阻抗控制参数 (EE impedance control parameters)
         self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0  # [left, right] x [x, y, z]
+        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 15.0   # [left, right] x [x, y, z]
         
         # EE目标状态 (EE target states)
         self.command_ee_setpos_w = torch.zeros(self.num_envs, 2, 3, device=self.device)  # [left, right] positions
@@ -273,11 +274,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
             # 更新当前EE状态到缓冲区首位 (Update current EE state to buffer front)
             current_ee_pos = self.marker_coords[:, -4:-2, :]  # 左右手
-            
-            current_ee_vel = torch.stack([
-                self.simulator._rigid_body_vel[:, self.left_hand_link_index, :],   # left EE
-                self.simulator._rigid_body_vel[:, self.right_hand_link_index, :]   # right EE
-            ], dim=1)  # (num_envs, 2, 3)
+            # print("current_ee_pos before:", current_ee_pos[0])
+
+            current_ee_vel = self.marker_vels[:, -4:-2, :]  # 左右手速度
             
             self.ref_ee_pos[:, 0] = current_ee_pos
             self.ref_ee_lin_vel[:, 0] = current_ee_vel
@@ -387,6 +386,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         ref_ee_acc_w = (
             self.ee_lin_kp.unsqueeze(1) * (setpos_w - self.ref_ee_pos) +
+            self.ee_lin_kd.unsqueeze(1) * (self.set_ee_linvel.unsqueeze(1) - self.ref_ee_lin_vel) +
             saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
         ) / self.ee_virtual_mass_tensor.unsqueeze(1)
         
@@ -827,10 +827,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             return torch.zeros(self.num_envs, device=self.device)
         
         # 获取当前EE位置 (Get current EE position)
-        current_ee_pos = torch.stack([
-            self.simulator._rigid_body_pos[:, self.left_hand_link_index, :],
-            self.simulator._rigid_body_pos[:, self.right_hand_link_index, :]
-        ], dim=1)  # (num_envs, 2, 3)
+        current_ee_pos = self.marker_coords[:, -4:-2, :]  # (num_envs, 2, 3)
         
         # 使用加权多时间步误差 (Use weighted multi-step error)
         weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
@@ -863,10 +860,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             return torch.zeros(self.num_envs, device=self.device)
         
         # 获取当前EE速度 (Get current EE velocity)
-        current_ee_vel = torch.stack([
-            self.simulator._rigid_body_vel[:, self.left_hand_link_index, :],
-            self.simulator._rigid_body_vel[:, self.right_hand_link_index, :]
-        ], dim=1)  # (num_envs, 2, 3)
+        current_ee_vel = self.marker_vels[:, -4:-2, :]  # (num_envs, 2, 3)
         
         # 使用第一个代理时间步的速度目标 (Use first surrogate time step velocity target)
         target_ee_vel = self.surrogate_ee_lin_vel_target[:, 0]  # (num_envs, 2, 3)
@@ -971,7 +965,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         for env_id in range(self.num_envs):
             # 检查是否为位置指令模式 (Check if in position command mode)
             # if self.impedance_command_mode[env_id, 0] == self.CMD_POSITION:
-            if True:
+            if False:
                 # 获取目标位置 (Get target position)
                 target_pos = self.command_setpos_w[env_id]
                 
@@ -986,7 +980,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                 # 绘制球体 (Draw sphere)
                 if hasattr(self.simulator, 'draw_sphere'):
                     self.simulator.draw_sphere(target_pos, sphere_radius,
-                                               sphere_color, env_id)
+                                            sphere_color, env_id)
                 
                 # 绘制目标偏航角箭头 (Draw target yaw arrow)
                 if hasattr(self.simulator, 'draw_line'):
@@ -1016,9 +1010,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                     # 左侧箭头线 (Left arrow head line)
                     left_head_end = arrow_end.clone()
                     left_head_end[0] -= (head_length *
-                                         torch.cos(target_yaw - head_angle))
+                                        torch.cos(target_yaw - head_angle))
                     left_head_end[1] -= (head_length *
-                                         torch.sin(target_yaw - head_angle))
+                                        torch.sin(target_yaw - head_angle))
                     self.simulator.draw_line(
                         Point(arrow_end),
                         Point(left_head_end),
@@ -1029,9 +1023,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                     # 右侧箭头线 (Right arrow head line)
                     right_head_end = arrow_end.clone()
                     right_head_end[0] -= (head_length *
-                                          torch.cos(target_yaw + head_angle))
+                                        torch.cos(target_yaw + head_angle))
                     right_head_end[1] -= (head_length *
-                                          torch.sin(target_yaw + head_angle))
+                                        torch.sin(target_yaw + head_angle))
                     self.simulator.draw_line(
                         Point(arrow_end),
                         Point(right_head_end),
@@ -1068,7 +1062,6 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                         (0.8, 0.0, 0.0),  # 深红色 - 第一个时间步 (Dark red - first)
                         (1.0, 0.4, 0.4),  # 中红色 - 第二个时间步 (Medium red - second)
                         (1.0, 0.7, 0.7),  # 浅红色 - 第三个时间步 (Light red - third)
-                        # (1.0, 0.9, 0.9),  # 浅红色 - 第四个时间步 (Light red - fourth)
                     ]
                     surrogate_radius = 0.08  # 稍小的半径 (Slightly smaller radius)
                     
@@ -1080,7 +1073,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                             # 绘制代理位置球体 (Draw surrogate position sphere)
                             if hasattr(self.simulator, 'draw_sphere'):
                                 self.simulator.draw_sphere(surr_pos, surrogate_radius,
-                                                          surr_color, env_id)
+                                                        surr_color, env_id)
                             
                             # 绘制代理速度目标箭头 (Draw surrogate velocity target arrow)
                             if (hasattr(self, 'surrogate_lin_vel_target') and
@@ -1091,75 +1084,27 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                                 
                                 # 只在速度足够大时绘制箭头 (Only draw if significant)
                                 if vel_magnitude > 0.01:
-                                    # 箭头长度与速度大小成比例
-                                    # Arrow length proportional to velocity magnitude
-                                    base_len = 0.1  # Min arrow length
-                                    scale = 0.2  # Velocity scale
+                                    base_len = 0.1
+                                    scale = 0.2
                                     vel_comp = vel_magnitude * scale
                                     arrow_length = base_len + vel_comp
-                                    # 限制最大箭头长度以避免过长
                                     arrow_length = min(arrow_length, 1.0)
                                     
-                                    vel_normalized = (
-                                        surr_vel /
-                                        vel_magnitude.clamp_min(1e-6))
-                                    arrow_end = (
-                                        surr_pos +
-                                        vel_normalized * arrow_length)
+                                    vel_normalized = surr_vel / vel_magnitude.clamp_min(1e-6)
+                                    arrow_end = surr_pos + vel_normalized * arrow_length
                                     
-                                    # 使用与球体相同的颜色绘制速度箭头
-                                    vel_color = surr_color
-                                    
-                                    # 绘制主箭头线 (Draw main arrow line)
+                                    # 绘制速度箭头 (Draw velocity arrow)
                                     self.simulator.draw_line(
                                         Point(surr_pos),
                                         Point(arrow_end),
-                                        Point(vel_color),
-                                        env_id
-                                    )
-                                    
-                                    # 绘制箭头头部 (Draw arrow head)
-                                    head_length = 0.08
-                                    vel_direction = torch.atan2(
-                                        vel_normalized[1], vel_normalized[0])
-                                    head_angle = torch.pi / 6  # 30度
-                                    
-                                    # 左侧箭头线 (Left arrow head line)
-                                    left_head_end = arrow_end.clone()
-                                    left_head_end[0] -= (
-                                        head_length *
-                                        torch.cos(vel_direction - head_angle))
-                                    left_head_end[1] -= (
-                                        head_length *
-                                        torch.sin(vel_direction - head_angle))
-                                    self.simulator.draw_line(
-                                        Point(arrow_end),
-                                        Point(left_head_end),
-                                        Point(vel_color),
-                                        env_id
-                                    )
-                                    
-                                    # 右侧箭头线 (Right arrow head line)
-                                    right_head_end = arrow_end.clone()
-                                    right_head_end[0] -= (
-                                        head_length *
-                                        torch.cos(vel_direction + head_angle))
-                                    right_head_end[1] -= (
-                                        head_length *
-                                        torch.sin(vel_direction + head_angle))
-                                    self.simulator.draw_line(
-                                        Point(arrow_end),
-                                        Point(right_head_end),
-                                        Point(vel_color),
+                                        Point(surr_color),
                                         env_id
                                     )
                             
-                            # 绘制从当前位置到代理位置的细线 (Draw thin line)
+                            # 绘制从当前位置到代理位置的连线 (Draw line from current to surrogate)
                             if hasattr(self.simulator, 'draw_line'):
-                                # 使用半透明效果 (Use semi-transparent effect)
                                 color_factor = 0.6
-                                surr_line_color = tuple(c * color_factor
-                                                        for c in surr_color)
+                                surr_line_color = tuple(c * color_factor for c in surr_color)
                                 self.simulator.draw_line(
                                     Point(current_pos),
                                     Point(surr_pos),
@@ -1167,6 +1112,66 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
                                     env_id
                                 )
 
+            if True:
+                # 绘制EE代理位置目标球体 (Draw EE surrogate position target spheres)
+                if hasattr(self, 'surrogate_ee_pos_target'):
+                    ee_colors = [
+                        [(0.0, 0.8, 0.8), (0.8, 0.0, 0.8)],  # 青色和紫色 - 左右手 (Cyan & Magenta)
+                        [(0.4, 1.0, 1.0), (1.0, 0.4, 1.0)],  # 浅青色和浅紫色 (Light Cyan & Light Magenta)
+                        [(0.7, 1.0, 1.0), (1.0, 0.7, 1.0)],  # 更浅的颜色 (Even lighter)
+                    ]
+                    ee_radius = 0.06  # EE球体半径 (EE sphere radius)
+                    
+                    for i, surr_step in enumerate(self.surr_steps):
+                        if i < len(ee_colors):
+                            for ee_idx in range(2):  # 左手和右手 (Left and right hand)
+                                # surrogate_ee_pos_target: (num_envs, surr_steps, 2, 3)
+                                ee_pos = self.surrogate_ee_pos_target[env_id, i, ee_idx]  # (3,)
+                                ee_color = ee_colors[i][ee_idx]
+                                
+                                # 绘制EE位置球体 (Draw EE position sphere)
+                                if hasattr(self.simulator, 'draw_sphere'):
+                                    self.simulator.draw_sphere(ee_pos, ee_radius,
+                                                            ee_color, env_id)
+                                
+                                # # 绘制EE速度目标箭头 (Draw EE velocity target arrow)
+                                # if (hasattr(self, 'surrogate_ee_lin_vel_target') and
+                                #         hasattr(self.simulator, 'draw_line')):
+                                    
+                                #     # surrogate_ee_lin_vel_target: (num_envs, surr_steps, 2, 3)
+                                #     ee_vel = self.surrogate_ee_lin_vel_target[env_id, i, ee_idx]  # (3,)
+                                #     vel_magnitude = ee_vel.norm()
+                                    
+                                #     # 只在速度足够大时绘制箭头 (Only draw if velocity is significant)
+                                #     if vel_magnitude > 0.01:
+                                #         arrow_length = 0.1 + vel_magnitude * 0.3
+                                #         arrow_length = min(arrow_length, 0.5)
+                                        
+                                #         vel_normalized = ee_vel / vel_magnitude.clamp_min(1e-6)
+                                #         arrow_end = ee_pos + vel_normalized * arrow_length
+                                        
+                                #         # 绘制速度箭头 (Draw velocity arrow)
+                                #         self.simulator.draw_line(
+                                #             Point(ee_pos),
+                                #             Point(arrow_end),
+                                #             Point(ee_color),
+                                #             env_id
+                                #         )
+                                
+                                # # 绘制从当前EE位置到代理位置的连线 (Draw line from current to surrogate EE)
+                                # if hasattr(self.simulator, 'draw_line'):
+                                #     current_ee_pos = self.marker_coords[env_id, -4+ee_idx*2:-2+ee_idx*2, :][0]  # 当前EE位置
+                                    
+                                #     # 使用半透明效果 (Use semi-transparent effect)
+                                #     color_factor = 0.5
+                                #     line_color = tuple(c * color_factor for c in ee_color)
+                                    
+                                #     self.simulator.draw_line(
+                                #         Point(current_ee_pos),
+                                #         Point(ee_pos),
+                                #         Point(line_color),
+                                #         env_id
+                                #     )
     # ============= Observations =============
 
     def _get_obs_upper_torq(self):

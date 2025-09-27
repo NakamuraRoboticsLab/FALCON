@@ -29,6 +29,8 @@ class IsaacGym(BaseSimulator):
         self.sim_step_count = 0
         self.robot_pos = None
         self.robot_quat = None
+
+        self.free_camera_mode = False  # False: 跟踪模式, True: 自由模式
         
         # temporary settings for user recording
         if config.save_rendering_dir is not None:
@@ -696,7 +698,7 @@ class IsaacGym(BaseSimulator):
         current_sim_time = self.sim_step_count * self.sim_dt
 
         # 摄像机跟踪机器人（仅一个环境时）
-        if self.num_envs == 1:
+        if self.num_envs == 1 and not self.free_camera_mode:
             # 获取机器人根状态
             # robot_pos = self.robot_root_states[0, 0:3].cpu().numpy()
             if current_sim_time < 8:

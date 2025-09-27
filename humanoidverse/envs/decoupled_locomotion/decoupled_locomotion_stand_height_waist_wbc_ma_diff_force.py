@@ -545,6 +545,30 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBCForce(LeggedRobotDecoupledLoc
         self._rigid_body_pos_extend = torch.cat([self.simulator._rigid_body_pos, self.extend_curr_pos], dim=1)
         self.marker_coords[:] = self._rigid_body_pos_extend.reshape(B, -1, 3) # visualize the robot rigid body pos
         # self.marker_coords[:] = self.ref_body_pos_extend.reshape(B, -1, 3) # visualize the target rigid body pos
+        ################### EXTEND Rigid body VEL (World Frame) #####################
+        # 计算扩展标记点在世界坐标系中的速度
+        # Calculate extended marker velocities in world frame
+        
+        # 父体的线速度和角速度 (Parent body linear and angular velocities)
+        parent_lin_vel = self.simulator._rigid_body_vel[:, self.extend_body_parent_ids]  # (num_envs, num_extend, 3)
+        parent_ang_vel = self.simulator._rigid_body_ang_vel[:, self.extend_body_parent_ids]  # (num_envs, num_extend, 3)
+        
+        # 扩展点相对于父体的位置向量 (Position vector from parent to extended point)
+        relative_pos = self.extend_curr_pos - self.simulator._rigid_body_pos[:, self.extend_body_parent_ids]  # (num_envs, num_extend, 3)
+        
+        # 使用刚体运动学公式计算扩展点速度：v = v_parent + ω × r
+        # Use rigid body kinematics: v = v_parent + ω × r
+        cross_product = torch.cross(parent_ang_vel, relative_pos, dim=-1)  # (num_envs, num_extend, 3)
+        extend_curr_vel = parent_lin_vel + cross_product  # (num_envs, num_extend, 3)
+        
+        # 合并原始刚体速度和扩展点速度
+        # Combine original rigid body velocities with extended point velocities
+        self._rigid_body_vel_extend = torch.cat([self.simulator._rigid_body_vel, extend_curr_vel], dim=1)
+        
+        # 更新marker_vels为世界坐标系下的速度
+        # Update marker_vels with world frame velocities
+        self.marker_vels[:] = self._rigid_body_vel_extend.reshape(B, -1, 3)
+
         # Hardcode: decide which one to use
         # 1. Apply forces within randomly sample shperes
         # left_ee_apply_force_pos = apply_sphere_sample_to_segments(self.simulator._rigid_body_pos[:, self.left_hand_link_index, :],

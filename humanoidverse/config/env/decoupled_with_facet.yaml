@@ -5,8 +5,8 @@ defaults:
 
 # Env structure
 env:
-  _target_: humanoidverse.envs.decoupled_locomotion.decoupled_with_facet_rvc.LeggedRobotDecoupledLocomotionWithFACETRVC
-  # _target_: humanoidverse.envs.decoupled_locomotion.decoupled_with_facet.LeggedRobotDecoupledLocomotionWithFACET
+  # _target_: humanoidverse.envs.decoupled_locomotion.decoupled_with_facet_rvc.LeggedRobotDecoupledLocomotionWithFACETRVC
+  _target_: humanoidverse.envs.decoupled_locomotion.decoupled_with_facet.LeggedRobotDecoupledLocomotionWithFACET
   config:
     max_episode_length_s: 50
     locomotion_obs_scales:
@@ -107,6 +107,8 @@ env:
       virtual_mass: 5.0
       virtual_inertia: 0.1
       ee_kp_init: 300.0
+      ee_virtual_mass: 5.0
+      max_ee_vel: 10.0
 
     rvc_params: 
       alpha_spd: 0.8

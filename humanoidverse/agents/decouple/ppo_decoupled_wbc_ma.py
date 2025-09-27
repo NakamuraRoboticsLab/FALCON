@@ -24,7 +24,7 @@ from rich.panel import Panel
 from rich.live import Live
 console = Console()
 
-NO_DL_REG = False  # 是否使用深度学习正则化
+NO_DL_REG = True  # 是否使用深度学习正则化
 
 class PPOMultiActorCritic(PPO):
     def __init__(self,
