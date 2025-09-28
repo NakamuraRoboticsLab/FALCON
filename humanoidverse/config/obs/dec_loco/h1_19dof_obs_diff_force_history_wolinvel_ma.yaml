@@ -22,10 +22,12 @@ obs:
       # grav_upper,
       # lin_kp,
       # ang_kp,
-      # ee_kp,
+      ee_kp,
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
+      ee_pos_ref,
+      ee_vel_ref,
     ]
 
     critic_obs: [
@@ -50,10 +52,12 @@ obs:
       # grav_upper,
       # lin_kp,
       # ang_kp,
-      # ee_kp,
+      ee_kp,
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
+      ee_pos_ref,
+      ee_vel_ref,
     ]
 
   obs_base_dict:
@@ -76,10 +80,12 @@ obs:
       # grav_upper,
       # lin_kp,
       # ang_kp,
-      # ee_kp,
+      ee_kp,
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
+      ee_pos_ref,
+      ee_vel_ref,
     ]
 
     critic_obs: [
@@ -104,10 +110,12 @@ obs:
       # grav_upper,
       # lin_kp,
       # ang_kp,
-      # ee_kp,
+      ee_kp,
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
+      ee_pos_ref,
+      ee_vel_ref,
     ]
   
   history_length:
@@ -137,10 +145,12 @@ obs:
     # grav_upper: 1.0,
     # lin_kp: 1.0,
     # ang_kp: 1.0,
-    # ee_kp: 1.0,
+    ee_kp: 1.0,
     upper_torq: 1.0,
     # ref_upper_point: 1.0,
     # curr_upper_point: 1.0,
+    ee_pos_ref: 1.0,
+    ee_vel_ref: 1.0,
   }
   
   add_noise: False
@@ -185,10 +195,12 @@ obs:
     # grav_upper: 0.0,
     # lin_kp: 0.0,
     # ang_kp: 0.0,
-    # ee_kp: 1.0,
+    ee_kp: 1.0,
     upper_torq: 1.0,
     # ref_upper_point: 1.0,
     # curr_upper_point: 1.0,
+    ee_pos_ref: 0.0,
+    ee_vel_ref: 0.0,
   }
 
   # obs_dims should use list instead of dict
@@ -215,10 +227,12 @@ obs:
     # - grav_upper: ${robot.upper_body_actions_dim} # upper body dofs
     # - lin_kp: 1
     # - ang_kp: 1
-    # - ee_kp: 6
+    - ee_kp: 6
     - upper_torq: ${robot.upper_body_actions_dim} # upper body dofs
     # - ref_upper_point: 12
     # - curr_upper_point: 12
+    - ee_pos_ref: 6 # 18
+    - ee_vel_ref: 6 # 18
 
   obs_base_dims:
     - base_orientation: 4
@@ -242,7 +256,9 @@ obs:
     # - grav_upper: ${robot.upper_body_actions_dim} # upper body dofs
     # - lin_kp: 1
     # - ang_kp: 1
-    # - ee_kp: 6
+    - ee_kp: 6
     - upper_torq: ${robot.upper_body_actions_dim} # upper body dofs
     # - ref_upper_point: 12
     # - curr_upper_point: 12
+    - ee_pos_ref: 6 # 18
+    - ee_vel_ref: 6 # 18

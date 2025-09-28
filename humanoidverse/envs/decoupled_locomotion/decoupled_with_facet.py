@@ -386,9 +386,11 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         ref_ee_acc_w = (
             self.ee_lin_kp.unsqueeze(1) * (setpos_w - self.ref_ee_pos) +
-            self.ee_lin_kd.unsqueeze(1) * (self.set_ee_linvel.unsqueeze(1) - self.ref_ee_lin_vel) +
-            saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
+            self.ee_lin_kd.unsqueeze(1) * (self.set_ee_linvel.unsqueeze(1) - self.ref_ee_lin_vel)
+            # + saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
         ) / self.ee_virtual_mass_tensor.unsqueeze(1)
+
+        # print("self.ee_force_ext_w:", self.ee_force_ext_w)
         
         # 存储当前时间步的参考加速度 (Store current timestep reference acceleration)
         self.ref_ee_lin_acc = ref_ee_acc_w
@@ -840,13 +842,15 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             weight = weights[i] if i < len(weights) else 0.01
             multi_step_errors.append(step_error * weight)
 
-        # single_step_error = (current_ee_pos - self.surrogate_ee_pos_target[:, 0]).square().sum(dim=-1).sum(dim=-1)
-        
-        pos_error_l2 = torch.stack(multi_step_errors, dim=1).sum(dim=1)  # (num_envs,)
+        # 计算单时间步位置误差 (Calculate position error)
+        diff = current_ee_pos - self.surrogate_ee_pos_target[:, 0]  # (num_envs, 2, 3)
+        single_step_error = diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
+
+        # pos_error_l2 = torch.stack(multi_step_errors, dim=1).sum(dim=1)  # (num_envs,)
+        pos_error_l2 = single_step_error
         
         # 使用指数衰减奖励函数 (Use exponential decay reward function)
-        base_reward = torch.exp(-pos_error_l2 / 0.5)  # 适当调整标准差
-        reward = base_reward * self.commands[:, 4]  # 只在行走模式下应用
+        reward = torch.exp(-pos_error_l2 / 0.5)  # 适当调整标准差
         
         return reward
     
@@ -864,16 +868,33 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # 获取当前EE速度 (Get current EE velocity)
         current_ee_vel = self.marker_vels[:, -4:-2, :]  # (num_envs, 2, 3)
         
-        # 使用第一个代理时间步的速度目标 (Use first surrogate time step velocity target)
-        target_ee_vel = self.surrogate_ee_lin_vel_target[:, 0]  # (num_envs, 2, 3)
+        # 使用加权多时间步的速度目标 (Use weighted multi-step velocity targets)
+        # 与位置跟踪相同的权重方案 (Same weighting scheme as position tracking)
+        weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
+        multi_step_errors = []
         
-        # 计算速度误差 (Calculate velocity error)
-        vel_diff = current_ee_vel - target_ee_vel  # (num_envs, 2, 3)
-        error_l2 = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,)
+        for i in range(len(self.surr_steps)):
+            # surrogate_ee_lin_vel_target: (num_envs, surr_steps, 2, 3)
+            target_ee_vel = self.surrogate_ee_lin_vel_target[:, i]  # (num_envs, 2, 3)
+            
+            # 计算速度误差 (Calculate velocity error)
+            vel_diff = current_ee_vel - target_ee_vel  # (num_envs, 2, 3)
+            step_error = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
+            
+            # 确保权重不越界 (Ensure weight doesn't go out of bounds)
+            weight = weights[i] if i < len(weights) else 0.01
+            multi_step_errors.append(step_error * weight)
+
+        # 计算single step速度误差 (Calculate velocity error)
+        vel_diff = current_ee_vel - self.surrogate_ee_lin_vel_target[:, 0]  # (num_envs, 2, 3)
+        single_step_error = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
+        
+        # 计算加权总误差 (Calculate weighted total error)
+        # error_l2 = torch.stack(multi_step_errors, dim=1).sum(dim=1)  # (num_envs,)
+        error_l2 = single_step_error
         
         # 使用指数衰减奖励函数 (Use exponential decay reward function)
         reward = torch.exp(-error_l2 / 0.25)
-        reward += -0.5 * error_l2
         
         return reward
     
@@ -1182,5 +1203,15 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
     def _get_obs_ee_kp(self):
         return self.ee_kp
-
     
+    def _get_obs_ee_pos_ref(self):
+        # 展开为一维向量，保留所有时间步信息
+        # Flatten to 1D vector, preserving all time step information
+        # return self.surrogate_ee_pos_target.view(self.num_envs, -1)  # (num_envs, 18)
+        return self.surrogate_ee_pos_target[:, 0].view(self.num_envs, -1)  # (num_envs, 6)
+    
+    def _get_obs_ee_vel_ref(self):
+        # 展开为一维向量，保留所有时间步信息
+        # Flatten to 1D vector, preserving all time step information
+        # return self.surrogate_ee_lin_vel_target.view(self.num_envs, -1)  # (num_envs, 18)
+        return self.surrogate_ee_lin_vel_target[:, 0].view(self.num_envs, -1)  # (num_envs, 6)
