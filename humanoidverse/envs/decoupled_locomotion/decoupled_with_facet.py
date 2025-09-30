@@ -863,8 +863,8 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             return torch.zeros(self.num_envs, device=self.device)
         
         # 获取当前EE位置 (Get current EE position)
-        current_ee_pos = self.marker_coords[:, -4:-2, :]  # (num_envs, 2, 3)
-        ref_ext = self.ref_body_pos_extend[:, -4:-2, :]
+        current_ee_pos = self.marker_coords[:, -4:, :]  # (num_envs, 2, 3)
+        ref_ext = self.ref_body_pos_extend[:, -4:, :]
         
         # # 使用加权多时间步误差 (Use weighted multi-step error)
         # weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)

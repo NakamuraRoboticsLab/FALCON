@@ -150,54 +150,84 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBC(LeggedRobotDecoupledLocomoti
         # Get motion data
         ref_joint_pos = motion_res["dof_pos"]  # [num_envs, num_dofs]
         ref_body_pos_world = motion_res["rg_pos_t"]  # [num_envs, bodies, 3]
+        ref_body_rot_world = motion_res["rg_rot_t"]  # [num_envs, bodies, 4]
+        ref_body_vel_world = motion_res["body_vel_t"]   # [num_envs, bodies, 3] - 添加速度数据
+        ref_body_ang_vel_world = motion_res["body_ang_vel_t"]  # [num_envs, bodies, 3] - 添加角速度数据
         ref_root_pos = motion_res["root_pos"]  # [num_envs, 3] - original base pos
         ref_root_rot = motion_res["root_rot"]  # [num_envs, 4] - original base quat
+        # ref_root_vel = motion_res["root_vel"]  # [num_envs, 3] - 添加根部角速度
+
         self.ref_body_pos_extend[:, :motion_res["rg_pos_t"].shape[1], :] = motion_res["rg_pos_t"] # [num_envs, 3]
 
         # Get current robot state
         current_base_pos = self.simulator.robot_root_states[:, :3]  # [num_envs, 3]
-        current_base_quat = self.simulator.base_quat  # [num_envs, 4]
-        
+        # current_base_quat = self.simulator.base_quat  # [num_envs, 4]
+
+        # 获取当前机器人状态 (Get current robot state)
+        current_torso_quat = self.simulator._rigid_body_rot[:, self.torso_index]
+        current_torso_pos = self.simulator._rigid_body_pos[:, self.torso_index]
+        current_torso_vel = self.simulator._rigid_body_vel[:, self.torso_index]
+        current_torso_ang_vel = self.simulator._rigid_body_ang_vel[:, self.torso_index]  # 添加当前躯干角速度
+
+        ref_torso_pos = ref_body_pos_world[:, self.torso_index, :]  # [num_envs, 3]
+        ref_torso_quat = ref_body_rot_world[:, self.torso_index, :]  # [num_envs, 4]
+        ref_torso_vel = ref_body_vel_world[:, self.torso_index, :]  # [num_envs, 3]
+        ref_torso_ang_vel = ref_body_ang_vel_world[:, self.torso_index, :]  # [num_envs, 3] - 添加参考躯干角速度
+    
         # Transform ref_upper_dof_pos to world frame considering base link relationship
         # Method: Apply relative transformation from original base to current base
         
-        # Step 1: Calculate relative position of extended body in original base frame
-        ref_body_pos_translated = ref_body_pos_world - ref_root_pos.unsqueeze(1)
+        # Step 1: 计算相对于原始torso的位置和速度 (Calculate positions and velocities relative to original torso)
+        ref_body_pos_translated = ref_body_pos_world - ref_torso_pos.unsqueeze(1)  # 相对于torso的位置
+        ref_body_vel_translated = ref_body_vel_world - ref_torso_vel.unsqueeze(1)  # 相对于torso的速度
+
         num_bodies = ref_body_pos_translated.shape[1]
         ref_body_pos_flat = ref_body_pos_translated.reshape(-1, 3)
-        ref_root_quat_expanded = ref_root_rot.unsqueeze(1).expand(
+        ref_body_vel_flat = ref_body_vel_translated.reshape(-1, 3)
+        
+        # 扩展torso四元数以匹配所有body (Expand torso quaternion to match all bodies)
+        ref_torso_quat_expanded = ref_torso_quat.unsqueeze(1).expand(
             -1, num_bodies, -1).reshape(-1, 4)
+        ref_torso_ang_vel_expanded = ref_torso_ang_vel.unsqueeze(1).expand(
+            -1, num_bodies, -1).reshape(-1, 3)  # 扩展角速度
         
-        # Get relative positions in original motion's base frame
+        # 将位置和速度转换到原始torso坐标系 (Convert positions and velocities to original torso frame)
         ref_body_pos_relative_flat = quat_rotate_inverse(
-            ref_root_quat_expanded, ref_body_pos_flat)
-        # ref_body_pos_relative = ref_body_pos_relative_flat.reshape(
-        #     self.num_envs, num_bodies, 3)
+            ref_torso_quat_expanded, ref_body_pos_flat)
+        # ref_body_vel_relative_flat = quat_rotate_inverse(
+        #     ref_torso_quat_expanded, ref_body_vel_flat)
+        cross_product = torch.cross(ref_torso_ang_vel_expanded, ref_body_pos_flat, dim=1)
+        ref_body_vel_corrected = ref_body_vel_flat - cross_product
+        ref_body_vel_relative_flat = quat_rotate_inverse(
+            ref_torso_quat_expanded, ref_body_vel_corrected)
         
-        # Step 2: Transform to current world frame via current torso link (use torso pose
-        # instead of the original base link). This aligns the reference motion to the
-        # robot's torso rather than the base root.
-        current_torso_quat = self.simulator._rigid_body_rot[:, self.torso_index]
-        current_torso_pos = self.simulator._rigid_body_pos[:, self.torso_index]
-
+        # Step 2: 转换到当前世界坐标系 (Transform to current world frame via current torso)
         current_torso_quat_expanded = current_torso_quat.unsqueeze(1).expand(
             -1, num_bodies, -1).reshape(-1, 4)
+        current_torso_ang_vel_expanded = current_torso_ang_vel.unsqueeze(1).expand(
+            -1, num_bodies, -1).reshape(-1, 3)  # 扩展当前角速度
 
-        # Apply current torso rotation and translation to get world positions
+        # 应用当前torso的旋转和平移得到世界位置 (Apply current torso rotation and translation to get world positions)
         ref_body_pos_world_current_flat = quat_rotate(
             current_torso_quat_expanded, ref_body_pos_relative_flat)
         ref_body_pos_world_current = ref_body_pos_world_current_flat.reshape(
             self.num_envs, num_bodies, 3) + current_torso_pos.unsqueeze(1)
 
-        # Update the reference body positions in current world frame (aligned to torso)
-        self.ref_body_pos_extend[:, :ref_body_pos_world_current.shape[1], :] = ref_body_pos_world_current
-        
-        # # Update the upper body joint positions from motion library
-        # ref_joint_pos = motion_res["dof_pos"] # [num_envs, num_dofs]
-        # self.ref_body_pos_extend[:, :motion_res["rg_pos_t"].shape[1], :] = motion_res["rg_pos_t"] # [num_envs, 3]
+        # 应用当前torso的旋转和速度得到世界速度 (Apply current torso rotation and velocity to get world velocities)
+        # v_world = R * v_relative + v_torso + omega_torso × r_relative_world
+        ref_body_vel_rotated_flat = quat_rotate(
+            current_torso_quat_expanded, ref_body_vel_relative_flat)
+        current_cross_product = torch.cross(current_torso_ang_vel_expanded, ref_body_pos_world_current_flat, dim=1)
+        ref_body_vel_world_current_flat = ref_body_vel_rotated_flat + current_cross_product
+        ref_body_vel_world_current = ref_body_vel_world_current_flat.reshape(
+            self.num_envs, num_bodies, 3) + current_torso_vel.unsqueeze(1)
 
-        self.ref_upper_dof_pos = ref_joint_pos[:, self.upper_dof_indices] # [num_envs, upper_body_actions_dim]
-        # Apply upper body action scale
+        # 更新参考身体位置和速度到当前世界坐标系 (Update reference body positions and velocities in current world frame)
+        self.ref_body_pos_extend[:, :ref_body_pos_world_current.shape[1], :] = ref_body_pos_world_current
+        self.ref_body_vel_extend[:, :ref_body_vel_world_current.shape[1], :] = ref_body_vel_world_current
+
+        # 更新上半身关节位置 (Update upper body joint positions)
+        self.ref_upper_dof_pos = ref_joint_pos[:, self.upper_dof_indices]
         self.ref_upper_dof_pos *= self.action_scale_upper_body
 
         # Store reference root position and rotation
