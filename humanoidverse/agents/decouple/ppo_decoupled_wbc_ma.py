@@ -82,6 +82,8 @@ class PPOMultiActorCritic(PPO):
         self.kl_coef_anneal_steps = self.env.config.regularization.kl_anneal_steps  # Number of iterations to anneal over
         self.kl_coef = self.kl_coef_start  # Current KL coefficient
 
+        self.ref_ext = None # for logging hand position error
+
     def _init_config(self):
         super()._init_config()
         self.algo_history_length_dict = self.env.config.obs.get('history_length', {})
@@ -610,6 +612,7 @@ class PPOMultiActorCritic(PPO):
 
         integrated_torso_vel_error = np.zeros(self.env.num_envs)
         integrated_hand_pos_error = np.zeros(self.env.num_envs)
+        integrated_hand_pos_error_z = np.zeros(self.env.num_envs)
         integrated_torque = np.zeros(self.env.num_envs)
         integrated_upper_body_error = np.zeros(self.env.num_envs)
 
@@ -624,8 +627,10 @@ class PPOMultiActorCritic(PPO):
 
             # only log the first hand (left hand)
             act_ext = self.env.marker_coords[:, -4, :3]  # (num_envs, 4, 3)
-            ref_ext = self.env.ref_body_pos_extend[:, -4, :3]  # (num_envs, 4, 3)
-            hand_pos_error = ref_ext - act_ext
+            # self.ref_ext = self.env.ref_body_pos_extend[:, -4, :3]
+            if step <= start_state_log:
+                self.ref_ext = self.env.marker_coords[:, -4, :3].clone()
+            hand_pos_error = self.ref_ext - act_ext
 
             # 获取 torso link 的四元数 (num_envs, 4)
             torso_quat = self.env.simulator._rigid_body_rot[:, self.env.torso_index, :]
@@ -672,6 +677,9 @@ class PPOMultiActorCritic(PPO):
 
                 hand_pos_error_np = np.linalg.norm(hand_pos_error_torso.cpu().numpy(), axis=1)  # shape: (num_envs, 4)
                 integrated_hand_pos_error += hand_pos_error_np  # only consider the first hand
+
+                if step > start_state_log + 2.0 / self.env.dt: # only consider the last 2 seconds
+                    integrated_hand_pos_error_z += hand_pos_error_torso[:, 2].cpu().numpy()
                 
                 integrated_torque += (arm_torques_sum_left + arm_torques_sum_right).cpu().numpy()
 
@@ -718,6 +726,12 @@ class PPOMultiActorCritic(PPO):
                 std_hand_error = integrated_hand_pos_error.std()
                 print(f"Average integrated hand position error over all envs: {avg_hand_error:.3f}")
                 print(f"Std integrated hand position error over all envs: {std_hand_error:.3f}")
+
+                integrated_hand_pos_error_z /= (stop_state_log - start_state_log - 2.0 / self.env.dt)
+                avg_hand_error_z = integrated_hand_pos_error_z.mean()
+                std_hand_error_z = integrated_hand_pos_error_z.std()
+                print(f"Average integrated hand position error Z over all envs: {avg_hand_error_z:.3f}")
+                print(f"Std integrated hand position error Z over all envs: {std_hand_error_z:.3f}")
 
                 # integrated torque
                 integrated_torque /= (stop_state_log - start_state_log)
