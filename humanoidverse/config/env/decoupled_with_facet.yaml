@@ -109,6 +109,9 @@ env:
       ee_kp_init: 300.0
       ee_virtual_mass: 5.0
       max_ee_vel: 10.0
+      ee_max_acc: [20.0, 20.0, 20.0]
+      ee_max_vel: [5.0, 5.0, 5.0]
+      ee_max_pos_offset: [0.4, 0.4, 0.4]
 
     rvc_params: 
       alpha_spd: 0.8

@@ -96,6 +96,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.virtual_inertia = self.config.facet_params.virtual_inertia
         self.max_acc_xy = self.config.facet_params.max_acc_xy
         self.max_vel_xy = self.config.facet_params.max_vel_xy
+        self.ee_max_acc = self.config.facet_params.ee_max_acc
+        self.ee_max_vel = self.config.facet_params.ee_max_vel
+        self.ee_max_pos_offset = self.config.facet_params.ee_max_pos_offset
         self.upper_torques = torch.zeros(self.num_envs, self.config.robot.upper_body_actions_dim, device=self.device)
 
         self.ee_virtual_mass = self.config.facet_params.ee_virtual_mass
@@ -197,7 +200,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # EE阻抗控制参数 (EE impedance control parameters)
         self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0  # [left, right] x [x, y, z]
-        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 15.0   # [left, right] x [x, y, z]
+        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 30.0   # [left, right] x [x, y, z]
         
         # EE目标状态 (EE target states)
         self.command_ee_setpos_w = torch.zeros(self.num_envs, 2, 3, device=self.device)  # [left, right] positions
@@ -283,7 +286,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         # 积分参考轨迹 (Integrate reference trajectory)
         self._integrate_reference_trajectory()
-        self._integrate_ee_reference_trajectory()
+        # self._integrate_ee_reference_trajectory()
 
         # 更新代理位置目标 (Update surrogate position target)
         # 使用多个时间步的参考轨迹位置作为代理目标 (Use multi-time step reference positions)
@@ -390,17 +393,48 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             # + saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
         ) / self.ee_virtual_mass_tensor.unsqueeze(1)
 
-        # print("self.ee_force_ext_w:", self.ee_force_ext_w)
-        
+        ee_max_acc_tensor = torch.tensor(self.ee_max_acc, device=self.device)  # (3,)
+        # 使用 ee_max_acc 限制EE加速度 (Use ee_max_acc to clamp EE acceleration)
+        ref_ee_acc_w[:, :, 0, :] = torch.clamp(ref_ee_acc_w[:, :, 0, :], 
+                                            -ee_max_acc_tensor, ee_max_acc_tensor)  # left hand
+        ref_ee_acc_w[:, :, 1, :] = torch.clamp(ref_ee_acc_w[:, :, 1, :], 
+                                            -ee_max_acc_tensor, ee_max_acc_tensor)  # right hand
+    
         # 存储当前时间步的参考加速度 (Store current timestep reference acceleration)
         self.ref_ee_lin_acc = ref_ee_acc_w
         
         # 积分EE速度和位置 (Integrate EE velocity and position)
         ref_ee_vel_w = self.ref_ee_lin_vel + ref_ee_acc_w * dt
         ref_ee_vel_w = torch.clamp(ref_ee_vel_w, -self.max_ee_vel, self.max_ee_vel)
-        
+
+        # 使用 max_ee_vel 限制EE速度 (Use max_ee_vel to clamp EE velocity)
+        max_ee_vel_tensor = torch.tensor([self.max_ee_vel] * 3, device=self.device)  # (3,)
+        ref_ee_vel_w[:, :, 0, :] = torch.clamp(ref_ee_vel_w[:, :, 0, :], 
+                                            -max_ee_vel_tensor, max_ee_vel_tensor)  # left hand
+        ref_ee_vel_w[:, :, 1, :] = torch.clamp(ref_ee_vel_w[:, :, 1, :], 
+                                            -max_ee_vel_tensor, max_ee_vel_tensor)  # right hand
+
         self.ref_ee_lin_vel = ref_ee_vel_w
         self.ref_ee_pos.add_(self.ref_ee_lin_vel * dt)
+
+        # 使用 ee_max_pos_offset 限制EE参考位置与当前位置的偏移 (Use ee_max_pos_offset to limit EE reference position offset)
+        current_ee_pos = self.marker_coords[:, -4:-2, :].unsqueeze(1)  # (num_envs, 1, 2, 3) 添加时间维度
+        
+        # 计算当前位置偏移量 (Calculate current position offset)
+        pos_offset = self.ref_ee_pos - current_ee_pos  # (num_envs, temporal_smoothing + 1, 2, 3)
+        
+        # 将列表转换为张量，用于逐轴限制 (Convert list to tensor for per-axis clamping)
+        ee_max_pos_offset_tensor = torch.tensor(self.ee_max_pos_offset, device=self.device)  # (3,) = [0.4, 0.4, 0.4]
+        
+        # 对每个轴分别进行限制 (Clamp each axis separately)
+        # pos_offset shape: (num_envs, temporal_smoothing + 1, 2, 3)
+        # ee_max_pos_offset_tensor shape: (3,)
+        pos_offset_clamped = torch.clamp(pos_offset, 
+                                    -ee_max_pos_offset_tensor.unsqueeze(0).unsqueeze(0).unsqueeze(0), 
+                                    ee_max_pos_offset_tensor.unsqueeze(0).unsqueeze(0).unsqueeze(0))
+    
+        # 更新参考位置 (Update reference position)
+        self.ref_ee_pos = current_ee_pos + pos_offset_clamped
 
     # should put it in initial domain randomization? 
     def update_impedance_command(self): 
@@ -830,20 +864,22 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # 获取当前EE位置 (Get current EE position)
         current_ee_pos = self.marker_coords[:, -4:-2, :]  # (num_envs, 2, 3)
+        ref_ext = self.ref_body_pos_extend[:, -4:-2, :]
         
-        # 使用加权多时间步误差 (Use weighted multi-step error)
-        weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
-        multi_step_errors = []
+        # # 使用加权多时间步误差 (Use weighted multi-step error)
+        # weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
+        # multi_step_errors = []
         
-        for i in range(len(self.surr_steps)):
-            # surrogate_ee_pos_target: (num_envs, surr_steps, 2, 3)
-            diff = current_ee_pos - self.surrogate_ee_pos_target[:, i]  # (num_envs, 2, 3)
-            step_error = diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
-            weight = weights[i] if i < len(weights) else 0.01
-            multi_step_errors.append(step_error * weight)
-
+        # for i in range(len(self.surr_steps)):
+        #     # surrogate_ee_pos_target: (num_envs, surr_steps, 2, 3)
+        #     diff = current_ee_pos - self.surrogate_ee_pos_target[:, i]  # (num_envs, 2, 3)
+        #     step_error = diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
+        #     weight = weights[i] if i < len(weights) else 0.01
+        #     multi_step_errors.append(step_error * weight)
         # 计算单时间步位置误差 (Calculate position error)
-        diff = current_ee_pos - self.surrogate_ee_pos_target[:, 0]  # (num_envs, 2, 3)
+        # diff = current_ee_pos - self.surrogate_ee_pos_target[:, 0]  # (num_envs, 2, 3)
+
+        diff = current_ee_pos - ref_ext  # (num_envs, 2, 3)
         single_step_error = diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
 
         # pos_error_l2 = torch.stack(multi_step_errors, dim=1).sum(dim=1)  # (num_envs,)
@@ -867,26 +903,29 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # 获取当前EE速度 (Get current EE velocity)
         current_ee_vel = self.marker_vels[:, -4:-2, :]  # (num_envs, 2, 3)
+        ref_ext = self.ref_body_vel_extend[:, -4:-2, :]
         
-        # 使用加权多时间步的速度目标 (Use weighted multi-step velocity targets)
-        # 与位置跟踪相同的权重方案 (Same weighting scheme as position tracking)
-        weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
-        multi_step_errors = []
+        # # 使用加权多时间步的速度目标 (Use weighted multi-step velocity targets)
+        # # 与位置跟踪相同的权重方案 (Same weighting scheme as position tracking)
+        # weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
+        # multi_step_errors = []
         
-        for i in range(len(self.surr_steps)):
-            # surrogate_ee_lin_vel_target: (num_envs, surr_steps, 2, 3)
-            target_ee_vel = self.surrogate_ee_lin_vel_target[:, i]  # (num_envs, 2, 3)
+        # for i in range(len(self.surr_steps)):
+        #     # surrogate_ee_lin_vel_target: (num_envs, surr_steps, 2, 3)
+        #     target_ee_vel = self.surrogate_ee_lin_vel_target[:, i]  # (num_envs, 2, 3)
             
-            # 计算速度误差 (Calculate velocity error)
-            vel_diff = current_ee_vel - target_ee_vel  # (num_envs, 2, 3)
-            step_error = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
+        #     # 计算速度误差 (Calculate velocity error)
+        #     vel_diff = current_ee_vel - target_ee_vel  # (num_envs, 2, 3)
+        #     step_error = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
             
-            # 确保权重不越界 (Ensure weight doesn't go out of bounds)
-            weight = weights[i] if i < len(weights) else 0.01
-            multi_step_errors.append(step_error * weight)
+        #     # 确保权重不越界 (Ensure weight doesn't go out of bounds)
+        #     weight = weights[i] if i < len(weights) else 0.01
+        #     multi_step_errors.append(step_error * weight)
 
         # 计算single step速度误差 (Calculate velocity error)
-        vel_diff = current_ee_vel - self.surrogate_ee_lin_vel_target[:, 0]  # (num_envs, 2, 3)
+        # vel_diff = current_ee_vel - self.surrogate_ee_lin_vel_target[:, 0]  # (num_envs, 2, 3)
+
+        vel_diff = current_ee_vel - ref_ext  # (num_envs, 2, 3)
         single_step_error = vel_diff.square().sum(dim=-1).sum(dim=-1)  # (num_envs,) - sum over EEs and xyz
         
         # 计算加权总误差 (Calculate weighted total error)
@@ -1208,10 +1247,10 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # 展开为一维向量，保留所有时间步信息
         # Flatten to 1D vector, preserving all time step information
         # return self.surrogate_ee_pos_target.view(self.num_envs, -1)  # (num_envs, 18)
-        return self.surrogate_ee_pos_target[:, 0].view(self.num_envs, -1)  # (num_envs, 6)
+        return self.ref_body_pos_extend[:, -4:-2, :].view(self.num_envs, -1)  # (num_envs, 6)
     
     def _get_obs_ee_vel_ref(self):
         # 展开为一维向量，保留所有时间步信息
         # Flatten to 1D vector, preserving all time step information
         # return self.surrogate_ee_lin_vel_target.view(self.num_envs, -1)  # (num_envs, 18)
-        return self.surrogate_ee_lin_vel_target[:, 0].view(self.num_envs, -1)  # (num_envs, 6)
+        return self.ref_body_vel_extend[:, -4:-2, :].view(self.num_envs, -1)  # (num_envs, 6)

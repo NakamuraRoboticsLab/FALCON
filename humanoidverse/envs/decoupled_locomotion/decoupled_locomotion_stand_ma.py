@@ -60,8 +60,8 @@ class LeggedRobotDecoupledLocomotionStance(LeggedRobotLocomotion):
         # res = self._motion_lib.get_motion_state(self.motion_ids, self.motion_times, offset=self.env_origins)
         if not self.config.robot.motion.reverse_motion: self._resample_motion_times(torch.arange(self.num_envs))
         self.motion_dt = self._motion_lib._motion_dt
-        # self.motion_start_idx = 0
-        self.motion_start_idx = 3 # 10 # 3 # 61 # set special motion as initial
+        self.motion_start_idx = 0
+        # self.motion_start_idx = 3 # 10 # 3 # 61 # set special motion as initial
         if self._motion_lib.standardize_motion_length and self.config.termination.terminate_when_motion_end:
             self.max_episode_length_s = self._motion_lib.standardize_motion_length_value
             self.max_episode_length = np.ceil(self.max_episode_length_s / self.dt)
@@ -103,6 +103,7 @@ class LeggedRobotDecoupledLocomotionStance(LeggedRobotLocomotion):
             self.marker_vels = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
             self.ref_body_pos_extend = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
             self.dif_global_body_pos = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
+            self.ref_body_vel_extend = torch.zeros(self.num_envs, self.num_bodies + self.num_extend_bodies, 3, dtype=torch.float, device=self.device, requires_grad=False)
 
     def _init_buffers(self):
         super()._init_buffers()
