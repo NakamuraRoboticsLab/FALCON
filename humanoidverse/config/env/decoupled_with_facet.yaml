@@ -112,6 +112,7 @@ env:
       ee_max_acc: [20.0, 20.0, 20.0]
       ee_max_vel: [5.0, 5.0, 5.0]
       ee_max_pos_offset: [0.4, 0.4, 0.4]
+      enable_upper_body_ik: True
 
     rvc_params: 
       alpha_spd: 0.8

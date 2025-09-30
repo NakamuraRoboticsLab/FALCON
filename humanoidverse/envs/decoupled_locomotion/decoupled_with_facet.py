@@ -85,6 +85,9 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.init_done = False
         # 首先调用父类初始化 (Initialize parent class first)
         super().__init__(config, device)
+        self.enable_upper_body_ik = getattr(self.config.facet_params, "enable_upper_body_ik", True)
+        if self.enable_upper_body_ik:
+            self._init_upper_body_ik()
         
 
         # FACET阻抗控制配置 (FACET impedance control configuration)
@@ -126,6 +129,19 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.vel_err_r = torch.zeros(self.num_envs, 1, device=self.device)
         self.surr_vel_base = torch.zeros(self.num_envs, 3, device=self.device)
         self.surr_yaw_vel_base = torch.zeros(self.num_envs, 1, device=self.device)
+
+    def _init_upper_body_ik(self):
+        self.upper_joint_indices = torch.as_tensor(self.upper_dof_indices, device=self.device, dtype=torch.long)
+        self.num_upper = len(self.upper_joint_indices)
+        # IK 参数
+        self.ik_damping = 0.01
+        self.ik_step_scale = 1.0
+        self.ik_max_step = 0.05
+        # 缓存
+        self.ik_upper_q = self.default_dof_pos[:, self.upper_joint_indices].clone()
+        # 左右手刚体索引（请根据实际命名调整）
+        # self.left_hand_body = getattr(self, "left_hand_link_index", None)
+        # self.right_hand_body = getattr(self, "right_hand_link_index", None)
 
     def _init_impedance_control(self):
         """初始化FACET阻抗控制系统 (Initialize FACET impedance system)"""
@@ -236,6 +252,68 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
     def update_controller(self):
         """更新控制器 (Update controller)"""
         self.update_impedance_control()
+        # 上肢 IK
+        if self.enable_upper_body_ik:
+            self._upper_body_ik_step()
+
+    def _upper_body_ik_step(self):
+        if self.num_upper == 0:
+            return
+        # 确保 jacobians 已更新
+        if not hasattr(self.simulator, "jacobian"):
+            return
+
+        # 当前手部位置：可用 rigid body states
+        cur_L = self.marker_coords[:, -4, :]
+        cur_R = self.marker_coords[:, -3, :]
+        # 目标：示例用 ref_body_pos_extend 最后两个（需与你的实际手部参考对应）
+        # 假设最后两个是左右手
+        tgt_L = self.ref_body_pos_extend[:, -4, :]
+        tgt_R = self.ref_body_pos_extend[:, -3, :]
+
+        err_L = tgt_L - cur_L  # (E,3)
+        err_R = tgt_R - cur_R  # (E,3)
+
+        # 取位置雅可比 (6→前3行为线速度) 并裁剪上肢列
+        J_L_full = self.compute_jacobian("left_elbow_link")
+        J_R_full = self.compute_jacobian("right_elbow_link")
+
+        # 只取位置行 0:3，并裁掉前6列浮动基座
+        # J_pos_full: (E,3,dof)
+        J_L_pos_all = J_L_full[:, 0:3, 6:]      # 去掉浮动基座列
+        J_R_pos_all = J_R_full[:, 0:3, 6:]
+
+        J_L = J_L_pos_all[:, :, self.upper_joint_indices]      # (E,3,Nu)
+        J_R = J_R_pos_all[:, :, self.upper_joint_indices]
+
+        # Damped Least Squares Δq = J^T (J J^T + λ^2 I)^-1 e
+        lam2 = self.ik_damping * self.ik_damping
+        # 左
+        JJt_L = torch.bmm(J_L, J_L.transpose(1,2)) + lam2 * torch.eye(3, device=self.device).unsqueeze(0)
+        rhs_L = err_L.unsqueeze(2)  # (E,3,1)
+        delta_q_L = torch.bmm(J_L.transpose(1,2), torch.linalg.solve(JJt_L, rhs_L)).squeeze(2)
+        # 右
+        JJt_R = torch.bmm(J_R, J_R.transpose(1,2)) + lam2 * torch.eye(3, device=self.device).unsqueeze(0)
+        rhs_R = err_R.unsqueeze(2)
+        delta_q_R = torch.bmm(J_R.transpose(1,2), torch.linalg.solve(JJt_R, rhs_R)).squeeze(2)
+
+        # 合并（简单平均，可加权）
+        delta_q = 0.5 * (delta_q_L + delta_q_R)
+        # 限幅
+        delta_q = torch.clamp(delta_q, -self.ik_max_step, self.ik_max_step)
+        # 更新 IK 关节角
+        self.ik_upper_q = self.ik_upper_q + self.ik_step_scale * delta_q
+
+        print("ik_upper_q:", self.ik_upper_q)
+
+    def compute_jacobian(self, link_name):
+        # Get the index of the link
+        link_index = self.simulator._body_list.index(link_name)
+
+        jacobian = self.simulator.jacobian
+        link_jacobian = jacobian[:, link_index, :, :].squeeze(1)  # Shape: (num_envs, 6, num_dof+6)
+
+        return link_jacobian
 
     def update_impedance_control(self):
         """更新阻抗控制 (Update impedance control)"""
@@ -370,6 +448,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.commands[:, 1] *= self.commands[:, 4]
         self.commands[:, 2] *= self.commands[:, 4]
 
+    @torch.no_grad()
     def _integrate_ee_reference_trajectory(self):
         """积分EE参考轨迹 (Integrate EE reference trajectory)"""
         dt = self.dt  # 0.02s
