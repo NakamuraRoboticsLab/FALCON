@@ -863,8 +863,8 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
             return torch.zeros(self.num_envs, device=self.device)
         
         # 获取当前EE位置 (Get current EE position)
-        current_ee_pos = self.marker_coords[:, -4:, :]  # (num_envs, 2, 3)
-        ref_ext = self.ref_body_pos_extend[:, -4:, :]
+        current_ee_pos = self.marker_coords[:, -4:-2, :]  # (num_envs, 2, 3)
+        ref_ext = self.ref_body_pos_extend[:, -4:-2, :]
         
         # # 使用加权多时间步误差 (Use weighted multi-step error)
         # weights = torch.tensor([0.6, 0.3, 0.1], device=self.device)
@@ -1247,10 +1247,13 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # 展开为一维向量，保留所有时间步信息
         # Flatten to 1D vector, preserving all time step information
         # return self.surrogate_ee_pos_target.view(self.num_envs, -1)  # (num_envs, 18)
-        return self.ref_body_pos_extend[:, -4:-2, :].view(self.num_envs, -1)  # (num_envs, 6)
+        return self.ref_body_pos_extend[:, -4:, :].view(self.num_envs, -1)  # (num_envs, 12)
     
     def _get_obs_ee_vel_ref(self):
         # 展开为一维向量，保留所有时间步信息
         # Flatten to 1D vector, preserving all time step information
         # return self.surrogate_ee_lin_vel_target.view(self.num_envs, -1)  # (num_envs, 18)
-        return self.ref_body_vel_extend[:, -4:-2, :].view(self.num_envs, -1)  # (num_envs, 6)
+        return self.ref_body_vel_extend[:, -4:, :].view(self.num_envs, -1)  # (num_envs, 12)
+    
+    def _get_obs_ref_upper_dof_vel(self):
+        return self.ref_upper_dof_vel

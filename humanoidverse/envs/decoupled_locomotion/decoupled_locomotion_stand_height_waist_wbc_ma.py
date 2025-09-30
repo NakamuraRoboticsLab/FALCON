@@ -44,6 +44,8 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBC(LeggedRobotDecoupledLocomoti
         self.motion_len = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
         self.ref_upper_dof_pos = torch.zeros(self.num_envs, self.config.robot.upper_body_actions_dim, \
                                                dtype=torch.float32, device=self.device, requires_grad=False)
+        self.ref_upper_dof_vel = torch.zeros(self.num_envs, self.config.robot.upper_body_actions_dim, \
+                                               dtype=torch.float32, device=self.device, requires_grad=False)
         self.ref_root_pos = torch.zeros(self.num_envs, 3, dtype=torch.float32, device=self.device, requires_grad=False)
         self.ref_root_rot = torch.zeros(self.num_envs, 4, dtype=torch.float32,
                                         device=self.device, requires_grad=False)
@@ -137,6 +139,7 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBC(LeggedRobotDecoupledLocomoti
         self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         if self.config.rewards.fix_upper_body:
             self.ref_upper_dof_pos *= 0.0
+            self.ref_upper_dof_vel *= 0.0
             return
         # Get the reference upper body joint positions
         offset = self.env_origins
@@ -149,6 +152,7 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBC(LeggedRobotDecoupledLocomoti
         
         # Get motion data
         ref_joint_pos = motion_res["dof_pos"]  # [num_envs, num_dofs]
+        ref_joint_vel = motion_res["dof_vel"]  # [num_envs, num_dofs]
         ref_body_pos_world = motion_res["rg_pos_t"]  # [num_envs, bodies, 3]
         ref_body_rot_world = motion_res["rg_rot_t"]  # [num_envs, bodies, 4]
         ref_body_vel_world = motion_res["body_vel_t"]   # [num_envs, bodies, 3] - 添加速度数据
@@ -229,6 +233,9 @@ class LeggedRobotDecoupledLocomotionStanceHeightWBC(LeggedRobotDecoupledLocomoti
         # 更新上半身关节位置 (Update upper body joint positions)
         self.ref_upper_dof_pos = ref_joint_pos[:, self.upper_dof_indices]
         self.ref_upper_dof_pos *= self.action_scale_upper_body
+
+        self.ref_upper_dof_vel = ref_joint_vel[:, self.upper_dof_indices]
+        self.ref_upper_dof_vel *= self.action_scale_upper_body
 
         # Store reference root position and rotation
         self.ref_root_pos = ref_root_pos.clone()

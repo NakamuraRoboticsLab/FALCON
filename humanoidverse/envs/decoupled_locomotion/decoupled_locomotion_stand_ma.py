@@ -117,6 +117,8 @@ class LeggedRobotDecoupledLocomotionStance(LeggedRobotLocomotion):
         self.motion_len = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
         self.ref_upper_dof_pos = torch.zeros(self.num_envs, self.config.robot.upper_body_actions_dim, \
                                                dtype=torch.float32, device=self.device, requires_grad=False)
+        self.ref_upper_dof_vel = torch.zeros(self.num_envs, self.config.robot.upper_body_actions_dim, \
+                                               dtype=torch.float32, device=self.device, requires_grad=False)
         self.episode_motion_length = torch.zeros(self.num_envs, dtype=torch.float32, device=self.device, requires_grad=False)
         self.tapping_in_place = torch.zeros(self.num_envs, 1, dtype=torch.float32, device=self.device, requires_grad=False)
         self.fix_waist_yaw_range = self.config.fix_waist_yaw_range
@@ -236,6 +238,7 @@ class LeggedRobotDecoupledLocomotionStance(LeggedRobotLocomotion):
         super()._pre_compute_observations_callback()
         if self.config.rewards.fix_upper_body:
             self.ref_upper_dof_pos *= 0.0
+            self.ref_upper_dof_vel *= 0.0
             return
         # Get the reference upper body joint positions
         offset = self.env_origins

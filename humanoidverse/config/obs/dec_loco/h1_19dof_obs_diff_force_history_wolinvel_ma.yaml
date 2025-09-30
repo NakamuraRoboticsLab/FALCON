@@ -11,9 +11,10 @@ obs:
       command_lin_vel,
       command_ang_vel,
       command_stand,
-      command_waist_dofs,
+      # command_waist_dofs,
       command_base_height,
       ref_upper_dof_pos,
+      ref_upper_dof_vel,
       dof_pos,
       dof_vel,
       actions,
@@ -26,8 +27,8 @@ obs:
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
-      ee_pos_ref,
-      ee_vel_ref,
+      # ee_pos_ref,
+      # ee_vel_ref,
     ]
 
     critic_obs: [
@@ -38,9 +39,10 @@ obs:
       command_lin_vel,
       command_ang_vel,
       command_stand,
-      command_waist_dofs,
+      # command_waist_dofs,
       command_base_height,
       ref_upper_dof_pos,
+      ref_upper_dof_vel,
       dof_pos,
       dof_vel,
       actions,
@@ -56,8 +58,8 @@ obs:
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
-      ee_pos_ref,
-      ee_vel_ref,
+      # ee_pos_ref,
+      # ee_vel_ref,
     ]
 
   obs_base_dict:
@@ -68,9 +70,10 @@ obs:
       command_lin_vel,
       command_ang_vel,
       command_stand,
-      command_waist_dofs,
+      # command_waist_dofs,
       command_base_height,
       ref_upper_dof_pos,
+      ref_upper_dof_vel,
       dof_pos,
       dof_vel,
       actions,
@@ -84,8 +87,8 @@ obs:
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
-      ee_pos_ref,
-      ee_vel_ref,
+      # ee_pos_ref,
+      # ee_vel_ref,
     ]
 
     critic_obs: [
@@ -96,9 +99,10 @@ obs:
       command_lin_vel,
       command_ang_vel,
       command_stand,
-      command_waist_dofs,
+      # command_waist_dofs,
       command_base_height,
       ref_upper_dof_pos,
+      ref_upper_dof_vel,
       dof_pos,
       dof_vel,
       actions,
@@ -114,8 +118,8 @@ obs:
       upper_torq,
       # ref_upper_point,
       # curr_upper_point,
-      ee_pos_ref,
-      ee_vel_ref,
+      # ee_pos_ref,
+      # ee_vel_ref,
     ]
   
   history_length:
@@ -130,9 +134,10 @@ obs:
     command_lin_vel: 1.0,
     command_ang_vel: 1.0,
     command_stand: 1.0,
-    command_waist_dofs: 1.0,
+    # command_waist_dofs: 1.0,
     command_base_height: 2.0,
     ref_upper_dof_pos: 1.0,
+    ref_upper_dof_vel: 0.5,
     dof_pos: 1.0,
     dof_vel: 0.05,
     actions: 1.0,
@@ -149,8 +154,8 @@ obs:
     upper_torq: 1.0,
     # ref_upper_point: 1.0,
     # curr_upper_point: 1.0,
-    ee_pos_ref: 1.0,
-    ee_vel_ref: 1.0,
+    # ee_pos_ref: 1.0,
+    # ee_vel_ref: 1.0,
   }
   
   add_noise: False
@@ -180,9 +185,10 @@ obs:
     command_lin_vel: 0.0,
     command_ang_vel: 0.0,
     command_stand: 0.0,
-    command_waist_dofs: 0.0,
+    # command_waist_dofs: 0.0,
     command_base_height: 0.0,
     ref_upper_dof_pos: 0.0,
+    ref_upper_dof_vel: 0.0,
     dof_pos: 0.01,
     dof_vel: 0.1, # 1.5
     actions: 0.0,
@@ -199,8 +205,8 @@ obs:
     upper_torq: 1.0,
     # ref_upper_point: 1.0,
     # curr_upper_point: 1.0,
-    ee_pos_ref: 0.0,
-    ee_vel_ref: 0.0,
+    # ee_pos_ref: 0.0,
+    # ee_vel_ref: 0.0,
   }
 
   # obs_dims should use list instead of dict
@@ -213,9 +219,10 @@ obs:
     - command_lin_vel: 2
     - command_ang_vel: 1
     - command_stand: 1
-    - command_waist_dofs: 3
+    # - command_waist_dofs: 3
     - command_base_height: 1
     - ref_upper_dof_pos: ${robot.upper_body_actions_dim} # upper body actions
+    - ref_upper_dof_vel: ${robot.upper_body_actions_dim} # upper body actions
     - dof_pos: ${robot.dof_obs_size}
     - dof_vel: ${robot.dof_obs_size}
     - actions: ${robot.dof_obs_size} # wbc body actions
@@ -231,8 +238,8 @@ obs:
     - upper_torq: ${robot.upper_body_actions_dim} # upper body dofs
     # - ref_upper_point: 12
     # - curr_upper_point: 12
-    - ee_pos_ref: 6 # 18
-    - ee_vel_ref: 6 # 18
+    # - ee_pos_ref: 12 # 18
+    # - ee_vel_ref: 12 # 18
 
   obs_base_dims:
     - base_orientation: 4
@@ -242,9 +249,10 @@ obs:
     - command_lin_vel: 2
     - command_ang_vel: 1
     - command_stand: 1
-    - command_waist_dofs: 3
+    # - command_waist_dofs: 3
     - command_base_height: 1
     - ref_upper_dof_pos: ${robot.upper_body_actions_dim} # upper body actions
+    - ref_upper_dof_vel: ${robot.upper_body_actions_dim} # upper body actions
     - dof_pos: ${robot.dof_obs_size}
     - dof_vel: ${robot.dof_obs_size}
     - actions: ${robot.dof_obs_size} # wbc body actions
@@ -260,5 +268,5 @@ obs:
     - upper_torq: ${robot.upper_body_actions_dim} # upper body dofs
     # - ref_upper_point: 12
     # - curr_upper_point: 12
-    - ee_pos_ref: 6 # 18
-    - ee_vel_ref: 6 # 18
+    # - ee_pos_ref: 12 # 18
+    # - ee_vel_ref: 12 # 18
