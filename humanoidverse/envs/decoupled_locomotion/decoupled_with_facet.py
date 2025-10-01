@@ -140,6 +140,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.extend_jacobians = None
         # 缓存
         self.ik_upper_q = self.default_dof_pos[:, self.upper_joint_indices].clone()
+        self.ik_upper_dq = self.default_dof_pos[:, self.upper_joint_indices].clone()
         # 左右手刚体索引（请根据实际命名调整）
         # self.left_hand_body = getattr(self, "left_hand_link_index", None)
         # self.right_hand_body = getattr(self, "right_hand_link_index", None)
@@ -306,9 +307,42 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # 限幅
         delta_q = torch.clamp(delta_q, -self.ik_max_step, self.ik_max_step)
         # 更新 IK 关节角
+        prev_q = self.ik_upper_q.clone()
         self.ik_upper_q = self.ik_upper_q + self.ik_step_scale * delta_q
 
-        print("ik_upper_q:", self.ik_upper_q)
+        # Velocity IK for next step
+        # 期望末端线速度 (E,3) 左/右
+        v_des_L = self.ref_body_vel_extend[:, -4, :]
+        v_des_R = self.ref_body_vel_extend[:, -3, :]
+        # 合并 (E,6)
+        v_des = torch.cat([v_des_L, v_des_R], dim=-1)
+
+        # 合并 Jacobian (E,6,Nu)
+        J_comb = torch.cat([J_L, J_R], dim=1)
+
+        I6 = torch.eye(6, device=self.device).unsqueeze(0)
+        JJt = torch.bmm(J_comb, J_comb.transpose(1, 2)) + lam2 * I6
+        rhs_v = v_des.unsqueeze(2)  # (E,6,1)
+        try:
+            tmp = torch.linalg.solve(JJt, rhs_v)          # (E,6,1)
+            dq = torch.bmm(J_comb.transpose(1, 2), tmp).squeeze(2)  # (E,Nu)
+        except RuntimeError:
+            # 回退：用位置步近似速度
+            dt_fallback = getattr(self, "dt", getattr(self, "sim_params", None).dt if hasattr(self, "sim_params") else 0.02)
+            dq = (self.ik_upper_q - prev_q) / dt_fallback
+
+        dq = torch.nan_to_num(dq, nan=0.0, posinf=0.0, neginf=0.0)
+        dq = torch.clamp(dq, -2.0, 2.0)
+        self.ik_upper_dq = dq  # 直接存储期望/解析得到的关节速度
+
+        # ===== 加关节限幅 (Clamp joint limits) =====
+        # 仅当父类已提供上下限张量 (dof_pos_limits_lower / upper) 时执行
+        hard_lower = self.simulator.hard_dof_pos_limits[self.upper_joint_indices, 0]
+        hard_upper = self.simulator.hard_dof_pos_limits[self.upper_joint_indices, 1]
+        self.ik_upper_q = torch.max(torch.min(self.ik_upper_q, hard_upper), hard_lower)
+        # ==========================================
+        # print("ik_upper_q:", self.ik_upper_q)
+        # print("ik_upper_dq:", self.ik_upper_dq)
     
     def _compute_extend_jacobians(self):
         jac_all = self.simulator.jacobian            # (E, num_bodies, 6, num_dofs)
@@ -1400,7 +1434,8 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         return self.ref_body_vel_extend[:, -4:, :].view(self.num_envs, -1)  # (num_envs, 12)
     
     def _get_obs_ref_upper_dof_vel(self):
-        return self.ref_upper_dof_vel
+        return self.ik_upper_dq
+        # return self.ref_upper_dof_vel
     
     def _get_obs_ref_upper_dof_pos(self):
         return self.ik_upper_q
