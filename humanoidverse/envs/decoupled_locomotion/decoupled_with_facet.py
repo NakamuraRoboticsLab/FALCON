@@ -347,9 +347,14 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         hard_upper = self.simulator.hard_dof_pos_limits[self.upper_joint_indices, 1]
         self.ik_upper_q = torch.max(torch.min(self.ik_upper_q, hard_upper), hard_lower)
         # ==========================================
+        # self.ik_upper_q = self.default_dof_pos[:, self.upper_joint_indices].clone()
+        # self.ik_upper_dq = torch.zeros_like(self.ik_upper_q)
         # print("ik_upper_q:", self.ik_upper_q)
         # print("ik_upper_dq:", self.ik_upper_dq)
         # print("self.ref_upper_dof_pos:", self.ref_upper_dof_pos)
+
+        self.ref_upper_dof_pos = self.ik_upper_q
+        self.ref_upper_dof_vel = self.ik_upper_dq
     
     def _compute_extend_jacobians(self):
         jac_all = self.simulator.jacobian            # (E, num_bodies, 6, num_dofs)
@@ -1440,9 +1445,10 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         return self.ref_body_vel_extend[:, -4:, :].view(self.num_envs, -1)  # (num_envs, 12)
     
     def _get_obs_ref_upper_dof_vel(self):
-        return self.ik_upper_dq
-        # return self.ref_upper_dof_vel
+        # return self.ik_upper_dq
+        return self.ref_upper_dof_vel
     
     def _get_obs_ref_upper_dof_pos(self):
-        return self.ik_upper_q
-        # return self.ref_upper_dof_pos
+        # print("Using ik upper dof pos as observation")
+        # return self.ik_upper_q
+        return self.ref_upper_dof_pos
