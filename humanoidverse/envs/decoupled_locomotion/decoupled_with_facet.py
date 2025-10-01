@@ -252,11 +252,11 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         return result
 
     def update_controller(self):
+        """更新控制器 (Update controller)"""
+        self.update_impedance_control()
         # 上肢 IK
         if self.enable_upper_body_ik:
             self._upper_body_ik_step()
-        """更新控制器 (Update controller)"""
-        self.update_impedance_control()
 
     def _upper_body_ik_step(self):
         if self.num_upper == 0:
@@ -270,8 +270,11 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         cur_R = self.marker_coords[:, -3, :]
         # 目标：示例用 ref_body_pos_extend 最后两个（需与你的实际手部参考对应）
         # 假设最后两个是左右手
-        tgt_L = self.ref_body_pos_extend[:, -4, :]
-        tgt_R = self.ref_body_pos_extend[:, -3, :]
+        # tgt_L = self.ref_body_pos_extend[:, -4, :]
+        # tgt_R = self.ref_body_pos_extend[:, -3, :]
+        # 使用第 0 个 surrogate 时间步
+        tgt_L = self.surrogate_ee_pos_target[:, 0, 0, :]  # (E,3) 左手
+        tgt_R = self.surrogate_ee_pos_target[:, 0, 1, :]  # (E,3) 右手
 
         err_L = tgt_L - cur_L  # (E,3)
         err_R = tgt_R - cur_R  # (E,3)
@@ -312,8 +315,11 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         # Velocity IK for next step
         # 期望末端线速度 (E,3) 左/右
-        v_des_L = self.ref_body_vel_extend[:, -4, :]
-        v_des_R = self.ref_body_vel_extend[:, -3, :]
+        # v_des_L = self.ref_body_vel_extend[:, -4, :]
+        # v_des_R = self.ref_body_vel_extend[:, -3, :]
+        v_des_L = self.surrogate_ee_lin_vel_target[:, 0, 0, :]
+        v_des_R = self.surrogate_ee_lin_vel_target[:, 0, 1, :]
+
         # 合并 (E,6)
         v_des = torch.cat([v_des_L, v_des_R], dim=-1)
 
@@ -343,6 +349,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # ==========================================
         # print("ik_upper_q:", self.ik_upper_q)
         # print("ik_upper_dq:", self.ik_upper_dq)
+        # print("self.ref_upper_dof_pos:", self.ref_upper_dof_pos)
     
     def _compute_extend_jacobians(self):
         jac_all = self.simulator.jacobian            # (E, num_bodies, 6, num_dofs)
@@ -463,7 +470,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
 
         # 积分参考轨迹 (Integrate reference trajectory)
         self._integrate_reference_trajectory()
-        # self._integrate_ee_reference_trajectory()
+        self._integrate_ee_reference_trajectory()
 
         # 更新代理位置目标 (Update surrogate position target)
         # 使用多个时间步的参考轨迹位置作为代理目标 (Use multi-time step reference positions)
@@ -547,7 +554,6 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.commands[:, 1] *= self.commands[:, 4]
         self.commands[:, 2] *= self.commands[:, 4]
 
-    @torch.no_grad()
     def _integrate_ee_reference_trajectory(self):
         """积分EE参考轨迹 (Integrate EE reference trajectory)"""
         dt = self.dt  # 0.02s
