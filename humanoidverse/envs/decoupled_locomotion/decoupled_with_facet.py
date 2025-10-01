@@ -282,7 +282,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         J_L_full = self.extend_jacobians[:, 0, 0:3, :]    # (E,3,N_total)
         J_R_full = self.extend_jacobians[:, 1, 0:3, :]
 
-        # 转换到躯干局部坐标系
+        # fixed torso link
         J_L_eff = self._compute_local_torso_jacobian(J_L_full)
         J_R_eff = self._compute_local_torso_jacobian(J_R_full)
 
@@ -1401,3 +1401,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
     
     def _get_obs_ref_upper_dof_vel(self):
         return self.ref_upper_dof_vel
+    
+    def _get_obs_ref_upper_dof_pos(self):
+        return self.ik_upper_q
+        # return self.ref_upper_dof_pos
