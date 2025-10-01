@@ -137,6 +137,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.ik_damping = 0.01
         self.ik_step_scale = 1.0
         self.ik_max_step = 0.05
+        self.extend_jacobians = None
         # 缓存
         self.ik_upper_q = self.default_dof_pos[:, self.upper_joint_indices].clone()
         # 左右手刚体索引（请根据实际命名调整）
@@ -250,11 +251,11 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         return result
 
     def update_controller(self):
-        """更新控制器 (Update controller)"""
-        self.update_impedance_control()
         # 上肢 IK
         if self.enable_upper_body_ik:
             self._upper_body_ik_step()
+        """更新控制器 (Update controller)"""
+        self.update_impedance_control()
 
     def _upper_body_ik_step(self):
         if self.num_upper == 0:
@@ -275,16 +276,19 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         err_R = tgt_R - cur_R  # (E,3)
 
         # 取位置雅可比 (6→前3行为线速度) 并裁剪上肢列
-        J_L_full = self.compute_jacobian("left_elbow_link")
-        J_R_full = self.compute_jacobian("right_elbow_link")
+        self._compute_extend_jacobians()
 
-        # 只取位置行 0:3，并裁掉前6列浮动基座
-        # J_pos_full: (E,3,dof)
-        J_L_pos_all = J_L_full[:, 0:3, 6:]      # 去掉浮动基座列
-        J_R_pos_all = J_R_full[:, 0:3, 6:]
+        # Jacobian 取线速度部分 (0:3)
+        J_L_full = self.extend_jacobians[:, 0, 0:3, :]    # (E,3,N_total)
+        J_R_full = self.extend_jacobians[:, 1, 0:3, :]
 
-        J_L = J_L_pos_all[:, :, self.upper_joint_indices]      # (E,3,Nu)
-        J_R = J_R_pos_all[:, :, self.upper_joint_indices]
+        # 转换到躯干局部坐标系
+        J_L_eff = self._compute_local_torso_jacobian(J_L_full)
+        J_R_eff = self._compute_local_torso_jacobian(J_R_full)
+
+        # 正确列切片 (最后一维)
+        J_L = J_L_eff[:, :, self.upper_joint_indices]    # (E,3,Nu)
+        J_R = J_R_eff[:, :, self.upper_joint_indices]
 
         # Damped Least Squares Δq = J^T (J J^T + λ^2 I)^-1 e
         lam2 = self.ik_damping * self.ik_damping
@@ -305,6 +309,49 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.ik_upper_q = self.ik_upper_q + self.ik_step_scale * delta_q
 
         print("ik_upper_q:", self.ik_upper_q)
+    
+    def _compute_extend_jacobians(self):
+        jac_all = self.simulator.jacobian            # (E, num_bodies, 6, num_dofs)
+        # parent body indices (tensor Long)
+        parent_ids = self.extend_body_parent_ids      # (num_extend,)
+        # offsets in parent frame (E, num_extend, 3)
+        pos_in_parent = self.extend_body_pos_in_parent  # already repeated over envs
+        # parent world orientations (quats) (E, num_bodies, 4) assumed wxyz
+        parent_rots = self.simulator._rigid_body_rot
+
+        num_envs = self.num_envs
+        num_dofs = jac_all.shape[-1]
+        num_ext = self.num_extend_bodies
+
+        self.extend_jacobians = torch.zeros(
+            num_envs, num_ext, 6, num_dofs, device=self.device, dtype=jac_all.dtype
+        )
+
+        for i in range(num_ext):
+            pid = parent_ids[i].item()
+            # Parent spatial jacobian: (E,6,N)
+            Jp = jac_all[:, pid, :, :]             # (E,6,num_dofs)
+            Jp_lin = Jp[:, 0:3, :]                 # (E,3,N)
+            Jp_ang = Jp[:, 3:6, :]                 # (E,3,N)
+
+            # Offset r in parent frame -> rotate to world
+            parent_quat = parent_rots[:, pid, :]   # (E,4)
+            r_parent = pos_in_parent[:, i, :]      # (E,3)
+            r_world = quat_apply(parent_quat, r_parent)  # (E,3)
+
+            # Compute ω × r for each column (damped-free algebra)
+            # ω columns: (E,3,N)
+            omega = Jp_ang
+            # Expand r to (E,N,3)
+            r_world_exp = r_world.unsqueeze(1).expand(-1, num_dofs, -1)  # (E,N,3)
+            omega_T = omega.transpose(1, 2)                              # (E,N,3)
+            cross_term = torch.cross(omega_T, r_world_exp, dim=2)        # (E,N,3)
+            cross_term = cross_term.transpose(1, 2)                      # (E,3,N)
+
+            J_lin_ext = Jp_lin + cross_term
+
+            self.extend_jacobians[:, i, 0:3, :] = J_lin_ext
+            self.extend_jacobians[:, i, 3:6, :] = Jp_ang
 
     def compute_jacobian(self, link_name):
         # Get the index of the link
@@ -314,6 +361,24 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         link_jacobian = jacobian[:, link_index, :, :].squeeze(1)  # Shape: (num_envs, 6, num_dof+6)
 
         return link_jacobian
+
+    def _compute_local_torso_jacobian(self, J_gen):
+        # Compute Jacobians for all possible states
+        J_torso_gen = self.compute_jacobian("torso_link")
+
+        J_0 = J_torso_gen[:, :, :6]  # Shape: (num_envs, 6, 6)
+        J_jnt = J_torso_gen[:, :, 6:]  # Shape: (num_envs, 6, num_dof)
+
+        J_0_inv = torch.linalg.pinv(J_0)  # Shape: (num_envs, 6, 6)
+        J_u = torch.matmul(J_0_inv, J_jnt)  # Shape: (num_envs, 6, num_dof)
+        J_u = -J_u
+
+        unit_matrix = torch.eye(self.num_dof, self.num_dof, device=self.device).unsqueeze(0).repeat(J_u.shape[0], 1, 1)
+        J_u_extended = torch.cat((J_u, unit_matrix), dim=1)
+
+        J = torch.matmul(J_gen, J_u_extended)  # Shape: (num_envs, 6, num_dof)
+
+        return J
 
     def update_impedance_control(self):
         """更新阻抗控制 (Update impedance control)"""
