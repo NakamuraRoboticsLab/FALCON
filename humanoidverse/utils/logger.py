@@ -132,7 +132,7 @@ class Logger:
         # plt.ylabel('Hand_pos_z_err [m]', fontsize=16)
         # plt.title('Hand Position Z Error', fontsize=16)
         plt.tick_params(axis='both', which='major', labelsize=14)
-        plt.xlim([0, 4])
+        plt.xlim([0, 6])
         plt.ylim([-0.1, 0.2])
         plt.show()
 

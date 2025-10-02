@@ -606,7 +606,7 @@ class PPOMultiActorCritic(PPO):
         robot_index = 0 # which robot is used for logging
         load_motion_log = int(1 / self.env.dt) # step to start loading motion
         start_state_log = int(9 / self.env.dt) # step to start plotting states
-        stop_state_log = int(13 / self.env.dt) # number of steps before plotting states
+        stop_state_log = int(15 / self.env.dt) # number of steps before plotting states
 
         base_quat = torch.zeros(self.env.num_envs, 4, device=self.device)
 
@@ -678,7 +678,7 @@ class PPOMultiActorCritic(PPO):
                 hand_pos_error_np = np.linalg.norm(hand_pos_error_torso.cpu().numpy(), axis=1)  # shape: (num_envs, 4)
                 integrated_hand_pos_error += hand_pos_error_np  # only consider the first hand
 
-                if step > start_state_log + 2.0 / self.env.dt: # only consider the last 2 seconds
+                if step > start_state_log + 4.0 / self.env.dt: # only consider the last 3 seconds
                     integrated_hand_pos_error_z += hand_pos_error_torso[:, 2].cpu().numpy()
                 
                 integrated_torque += (arm_torques_sum_left + arm_torques_sum_right).cpu().numpy()
@@ -727,7 +727,7 @@ class PPOMultiActorCritic(PPO):
                 print(f"Average integrated hand position error over all envs: {avg_hand_error:.3f}")
                 print(f"Std integrated hand position error over all envs: {std_hand_error:.3f}")
 
-                integrated_hand_pos_error_z /= (stop_state_log - start_state_log - 2.0 / self.env.dt)
+                integrated_hand_pos_error_z /= (stop_state_log - start_state_log - 4.0 / self.env.dt)
                 avg_hand_error_z = integrated_hand_pos_error_z.mean()
                 std_hand_error_z = integrated_hand_pos_error_z.std()
                 print(f"Average integrated hand position error Z over all envs: {avg_hand_error_z:.3f}")

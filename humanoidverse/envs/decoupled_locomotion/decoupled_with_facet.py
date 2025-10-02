@@ -218,7 +218,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # EE阻抗控制参数 (EE impedance control parameters)
         self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0  # [left, right] x [x, y, z]
-        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 10.0   # [left, right] x [x, y, z]
+        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 20.0   # [left, right] x [x, y, z]
         
         # EE目标状态 (EE target states)
         self.command_ee_setpos_w = torch.zeros(self.num_envs, 2, 3, device=self.device)  # [left, right] positions
@@ -676,17 +676,62 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.commands[:, 1] *= self.commands[:, 4]
         self.commands[:, 2] *= self.commands[:, 4]
 
+    def _fk_upper_ee_from_ref(self, q_ref: torch.Tensor):
+        """
+        通过参考关节角 q_ref 估计左右手 EE 位置 (近似 FK).
+        使用一阶线性化: p_ref ≈ p_cur + J_lin * (q_ref - q_cur)
+        若未来有真正的 FK 接口, 可在此优先调用.
+        Returns:
+            ee_pos_ref (E,2,3)
+        """
+        # 当前关节角
+        q_cur = self.simulator.dof_pos[:, self.upper_joint_indices]  # (E,Nu)
+        delta_q = (q_ref - q_cur)                                    # (E,Nu)
+
+        # 当前手位置 (左右手按原约定取 -4:-2)
+        cur_L = self.marker_coords[:, -4, :]  # (E,3)
+        cur_R = self.marker_coords[:, -3, :]
+
+        # 确保扩展 Jacobian 已计算
+        self._compute_extend_jacobians()
+        if self.extend_jacobians is None or self.extend_jacobians.shape[1] < 2:
+            # 回退: 直接返回当前手位置
+            return torch.stack([cur_L, cur_R], dim=1)
+
+        # 线速度部分
+        J_L_full = self.extend_jacobians[:, 0, 0:3, :]   # (E,3,Ntot)
+        J_R_full = self.extend_jacobians[:, 1, 0:3, :]
+
+        # 去基座 (用 torso 消元与 IK 保持一致)
+        J_L_eff = self._compute_local_torso_jacobian(J_L_full)  # (E,6,num_dof)
+        J_R_eff = self._compute_local_torso_jacobian(J_R_full)
+
+        # 只取线部分前3行 (因为 _compute_local_torso_jacobian 输出 6xN)
+        J_L = J_L_eff[:, 0:3, self.upper_joint_indices]  # (E,3,Nu)
+        J_R = J_R_eff[:, 0:3, self.upper_joint_indices]
+
+        # 线性化位移
+        dp_L = torch.bmm(J_L, delta_q.unsqueeze(-1)).squeeze(-1)  # (E,3)
+        dp_R = torch.bmm(J_R, delta_q.unsqueeze(-1)).squeeze(-1)
+
+        ee_L_ref = cur_L + dp_L
+        ee_R_ref = cur_R + dp_R
+        return torch.stack([ee_L_ref, ee_R_ref], dim=1)  # (E,2,3)
+
     def _integrate_ee_reference_trajectory(self):
         """积分EE参考轨迹 (Integrate EE reference trajectory)"""
         dt = self.dt  # 0.02s
         
         # 计算期望EE位置 (Calculate desired EE position)
         # setpos_w shape: (num_envs, 1, 2, 3)
-        self.command_ee_setpos_w = self.ref_body_pos_extend[:, -4:-2, :]
+        # self.command_ee_setpos_w = self.ref_body_pos_extend[:, -4:-2, :]
+        ee_pos_ref = self._fk_upper_ee_from_ref(self.ref_upper_dof_pos)  # (E,2,3)
+        self.command_ee_setpos_w = ee_pos_ref  # 覆盖原来的引用
+
         setpos_w = self.command_ee_setpos_w.unsqueeze(1)
         
         # 计算EE参考加速度 (Calculate EE reference acceleration)
-        self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0
+        self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 500.0
         self.ee_lin_kp[:, 0, :] *= self.ee_kp[:, :3]  # left hand
         self.ee_lin_kp[:, 1, :] *= self.ee_kp[:, 3:]  # right hand
 
