@@ -107,7 +107,7 @@ env:
       virtual_mass: 5.0
       virtual_inertia: 0.1
       ee_kp_init: 300.0
-      ee_virtual_mass: 5.0
+      ee_virtual_mass: 15.0
       max_ee_vel: 10.0
       ee_max_acc: [20.0, 20.0, 20.0]
       ee_max_vel: [5.0, 5.0, 5.0]

@@ -218,7 +218,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         
         # EE阻抗控制参数 (EE impedance control parameters)
         self.ee_lin_kp = torch.ones(self.num_envs, 2, 3, device=self.device) * 300.0  # [left, right] x [x, y, z]
-        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 30.0   # [left, right] x [x, y, z]
+        self.ee_lin_kd = torch.ones(self.num_envs, 2, 3, device=self.device) * 10.0   # [left, right] x [x, y, z]
         
         # EE目标状态 (EE target states)
         self.command_ee_setpos_w = torch.zeros(self.num_envs, 2, 3, device=self.device)  # [left, right] positions
@@ -273,8 +273,19 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         # tgt_L = self.ref_body_pos_extend[:, -4, :]
         # tgt_R = self.ref_body_pos_extend[:, -3, :]
         # 使用第 0 个 surrogate 时间步
-        tgt_L = self.surrogate_ee_pos_target[:, 0, 0, :]  # (E,3) 左手
-        tgt_R = self.surrogate_ee_pos_target[:, 0, 1, :]  # (E,3) 右手
+        # tgt_L = self.surrogate_ee_pos_target[:, 0, 0, :]  # (E,3) 左手
+        # tgt_R = self.surrogate_ee_pos_target[:, 0, 1, :]  # (E,3) 右手
+        # 使用加权多时间步得到加权末端目标 (Weighted multi-step EE targets)
+        # surrogate_ee_pos_target shape: (E, S, 2, 3)
+        S = self.surrogate_ee_pos_target.shape[1]
+        base_weights = torch.tensor([0.6, 0.3, 0.1], device=self.device, dtype=self.surrogate_ee_pos_target.dtype)
+        w = base_weights[:S]
+        if w.sum() <= 0:
+            w = torch.ones_like(w)
+        w = (w / w.sum()).view(1, S, 1, 1)              # (1,S,1,1)
+        weighted_targets = (self.surrogate_ee_pos_target * w).sum(dim=1)  # (E,2,3)
+        tgt_L = weighted_targets[:, 0, :]               # (E,3)
+        tgt_R = weighted_targets[:, 1, :]               # (E,3)
 
         err_L = tgt_L - cur_L  # (E,3)
         err_R = tgt_R - cur_R  # (E,3)
@@ -294,52 +305,158 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         J_L = J_L_eff[:, :, self.upper_joint_indices]    # (E,3,Nu)
         J_R = J_R_eff[:, :, self.upper_joint_indices]
 
-        # Damped Least Squares Δq = J^T (J J^T + λ^2 I)^-1 e
-        lam2 = self.ik_damping * self.ik_damping
-        # 左
-        JJt_L = torch.bmm(J_L, J_L.transpose(1,2)) + lam2 * torch.eye(3, device=self.device).unsqueeze(0)
-        rhs_L = err_L.unsqueeze(2)  # (E,3,1)
-        delta_q_L = torch.bmm(J_L.transpose(1,2), torch.linalg.solve(JJt_L, rhs_L)).squeeze(2)
-        # 右
-        JJt_R = torch.bmm(J_R, J_R.transpose(1,2)) + lam2 * torch.eye(3, device=self.device).unsqueeze(0)
-        rhs_R = err_R.unsqueeze(2)
-        delta_q_R = torch.bmm(J_R.transpose(1,2), torch.linalg.solve(JJt_R, rhs_R)).squeeze(2)
+        # # Damped Least Squares Δq = J^T (J J^T + λ^2 I)^-1 e
+        # lam2 = self.ik_damping * self.ik_damping
+        # # 左
+        # JJt_L = torch.bmm(J_L, J_L.transpose(1,2)) + lam2 * torch.eye(3, device=self.device).unsqueeze(0)
+        # rhs_L = err_L.unsqueeze(2)  # (E,3,1)
+        # delta_q_L = torch.bmm(J_L.transpose(1,2), torch.linalg.solve(JJt_L, rhs_L)).squeeze(2)
+        # # 右
+        # JJt_R = torch.bmm(J_R, J_R.transpose(1,2)) + lam2 * torch.eye(3, device=self.device).unsqueeze(0)
+        # rhs_R = err_R.unsqueeze(2)
+        # delta_q_R = torch.bmm(J_R.transpose(1,2), torch.linalg.solve(JJt_R, rhs_R)).squeeze(2)
 
-        # 合并（简单平均，可加权）
-        delta_q = 0.5 * (delta_q_L + delta_q_R)
-        # 限幅
-        delta_q = torch.clamp(delta_q, -self.ik_max_step, self.ik_max_step)
-        # 更新 IK 关节角
+        # # 合并（简单平均，可加权）
+        # delta_q = 0.5 * (delta_q_L + delta_q_R)
+        # # 限幅
+        # delta_q = torch.clamp(delta_q, -self.ik_max_step, self.ik_max_step)
+        # # 更新 IK 关节角
+        # prev_q = self.ik_upper_q.clone()
+        # self.ik_upper_q = self.ik_upper_q + self.ik_step_scale * delta_q
+
+        # ===== Stable SR-inv IK (replace previous per-arm DLS averaging) =====
+        # Stack errors (world frame)
+        e = torch.cat([err_L, err_R], dim=1)          # (E,6)
+
+        # Combined task Jacobian (6 x Nu)
+        J_comb = torch.cat([J_L, J_R], dim=1)         # (E,6,Nu)
+
+        # Desired task velocity: feed-forward (ref velocity) + proportional on position error
+        # v_task = [v_L; v_R]  each (E,3) -> (E,6)
+        # Use ref_body_vel_extend last two (hands) if available, else zeros
+        if hasattr(self, "ref_body_vel_extend"):
+            v_ff_L = self.ref_body_vel_extend[:, -4, :]
+            v_ff_R = self.ref_body_vel_extend[:, -3, :]
+        else:
+            v_ff_L = torch.zeros_like(err_L)
+            v_ff_R = torch.zeros_like(err_R)
+
+        task_kp = getattr(self, "ik_task_kp", 5.0)  # position gain to turn pos error into velocity
+        v_task_L = v_ff_L + task_kp * err_L
+        v_task_R = v_ff_R + task_kp * err_R
+        v_task = torch.cat([v_task_L, v_task_R], dim=1)  # (E,6)
+
+        # Damped pseudo-inverse
+        # lam = self.ik_damping
+        lam_base = self.ik_damping
+        try:
+            # svdvals returns singular values in descending order
+            svals = torch.linalg.svdvals(J_comb)              # (E, min(6,Nu))
+            s_max = svals[:, 0]
+            s_min = svals[:, -1]
+            cond = s_max / (s_min + 1e-6)                     # (E,)
+            # Parameters (can be moved to config)
+            c0 = getattr(self, "ik_cond_center", 50.0)        # center condition number
+            k  = getattr(self, "ik_cond_steep", 10.0)         # slope
+            lam_min = getattr(self, "ik_damp_min", lam_base * 0.5)
+            lam_max = getattr(self, "ik_damp_max", lam_base * 10.0)
+            sigm = torch.sigmoid((cond - c0) / k)
+            lam_vec = lam_min + (lam_max - lam_min) * sigm    # (E,)
+        except RuntimeError:
+            # Fallback to constant damping
+            lam_vec = torch.full((J_comb.shape[0],), lam_base, device=self.device)
+
+        I6 = torch.eye(6, device=self.device).unsqueeze(0)
+        JJt = torch.bmm(J_comb, J_comb.transpose(1, 2)) + (lam_vec * lam_vec).view(-1, 1, 1) * I6  # (E,6,6)
+
+        # JJt = torch.bmm(J_comb, J_comb.transpose(1, 2)) + (lam * lam) * torch.eye(6, device=self.device).unsqueeze(0)  # (E,6,6)
+        try:
+            inv = torch.linalg.solve(JJt, v_task.unsqueeze(-1))  # (E,6,1)
+        except RuntimeError:
+            return  # abort this frame if singular
+        J_pinv = torch.bmm(J_comb.transpose(1, 2), inv).squeeze(-1)  # primary term already multiplied by v_task? <- NO (fix below)
+
+        # Correct computation: first compute J^#_λ then multiply by v_task
+        # Recompute damped pseudoinverse explicitly for clarity
+        try:
+            JJt_inv = torch.linalg.solve(JJt, torch.eye(6, device=self.device).unsqueeze(0))  # (E,6,6)
+        except RuntimeError:
+            return
+        J_damped_pinv = torch.bmm(J_comb.transpose(1, 2), JJt_inv)  # (E,Nu,6)
+
+        qdot_primary = torch.bmm(J_damped_pinv, v_task.unsqueeze(-1)).squeeze(-1)  # (E,Nu)
+
+        # Null-space projector & secondary (posture) objective
+        q_cur = self.ik_upper_q  # (E,Nu)
+        # q_cur = self.simulator.dof_pos[:, self.upper_joint_indices]
+        q_ref = self.ref_upper_dof_pos
+
+        k_post = getattr(self, "ik_null_gain", 0.2)
+        I_Nu = torch.eye(q_cur.shape[1], device=self.device).unsqueeze(0)  # (1,Nu,Nu)
+        N = I_Nu - torch.bmm(J_damped_pinv, J_comb)  # (E,Nu,Nu)
+        q_err = (q_ref - q_cur).unsqueeze(-1)        # (E,Nu,1)
+        qdot_null = torch.bmm(N, q_err).squeeze(-1) * k_post  # (E,Nu)
+
+        qdot = qdot_primary + qdot_null  # (E,Nu)
+
+        # Velocity clamp
+        qdot_max = getattr(self, "ik_vel_max", 2.0)
+        qdot = torch.clamp(qdot, -qdot_max, qdot_max)
+
+        # Integrate
+        dt = getattr(self, "dt", getattr(self, "sim_params", None).dt if hasattr(self, "sim_params") else 0.02)
+        delta_q = qdot * dt
+        step_clip = self.ik_max_step
+        delta_q = torch.clamp(delta_q, -step_clip, step_clip)
+
         prev_q = self.ik_upper_q.clone()
         self.ik_upper_q = self.ik_upper_q + self.ik_step_scale * delta_q
+        self.ik_upper_dq = qdot
+
+        # Joint hard limits
+        hard_lower = self.simulator.hard_dof_pos_limits[self.upper_joint_indices, 0]
+        hard_upper = self.simulator.hard_dof_pos_limits[self.upper_joint_indices, 1]
+        self.ik_upper_q = torch.max(torch.min(self.ik_upper_q, hard_upper), hard_lower)
 
         # Velocity IK for next step
         # 期望末端线速度 (E,3) 左/右
         # v_des_L = self.ref_body_vel_extend[:, -4, :]
         # v_des_R = self.ref_body_vel_extend[:, -3, :]
-        v_des_L = self.surrogate_ee_lin_vel_target[:, 0, 0, :]
-        v_des_R = self.surrogate_ee_lin_vel_target[:, 0, 1, :]
+        # v_des_L = self.surrogate_ee_lin_vel_target[:, 0, 0, :]
+        # v_des_R = self.surrogate_ee_lin_vel_target[:, 0, 1, :]
+        # Velocity IK (use weighted multi-step surrogate EE velocity targets, same style as position)
+        # # surrogate_ee_lin_vel_target: (E, S, 2, 3)
+        # S = self.surrogate_ee_lin_vel_target.shape[1]
+        # base_w = torch.tensor([0.6, 0.3, 0.1], device=self.device,
+        #                         dtype=self.surrogate_ee_lin_vel_target.dtype)
+        # w = base_w[:S]
+        # if w.sum() <= 0:
+        #     w = torch.ones_like(w)
+        # w = (w / w.sum()).view(1, S, 1, 1)                 # (1,S,1,1)
+        # weighted_ee_vel = (self.surrogate_ee_lin_vel_target * w).sum(dim=1)  # (E,2,3)
+        # v_des_L = weighted_ee_vel[:, 0, :]                 # (E,3)
+        # v_des_R = weighted_ee_vel[:, 1, :]                 # (E,3)
 
-        # 合并 (E,6)
-        v_des = torch.cat([v_des_L, v_des_R], dim=-1)
+        # # 合并 (E,6)
+        # v_des = torch.cat([v_des_L, v_des_R], dim=-1)
 
-        # 合并 Jacobian (E,6,Nu)
-        J_comb = torch.cat([J_L, J_R], dim=1)
+        # # 合并 Jacobian (E,6,Nu)
+        # J_comb = torch.cat([J_L, J_R], dim=1)
 
-        I6 = torch.eye(6, device=self.device).unsqueeze(0)
-        JJt = torch.bmm(J_comb, J_comb.transpose(1, 2)) + lam2 * I6
-        rhs_v = v_des.unsqueeze(2)  # (E,6,1)
-        try:
-            tmp = torch.linalg.solve(JJt, rhs_v)          # (E,6,1)
-            dq = torch.bmm(J_comb.transpose(1, 2), tmp).squeeze(2)  # (E,Nu)
-        except RuntimeError:
-            # 回退：用位置步近似速度
-            dt_fallback = getattr(self, "dt", getattr(self, "sim_params", None).dt if hasattr(self, "sim_params") else 0.02)
-            dq = (self.ik_upper_q - prev_q) / dt_fallback
+        # I6 = torch.eye(6, device=self.device).unsqueeze(0)
+        # JJt = torch.bmm(J_comb, J_comb.transpose(1, 2)) + lam2 * I6
+        # rhs_v = v_des.unsqueeze(2)  # (E,6,1)
+        # try:
+        #     tmp = torch.linalg.solve(JJt, rhs_v)          # (E,6,1)
+        #     dq = torch.bmm(J_comb.transpose(1, 2), tmp).squeeze(2)  # (E,Nu)
+        # except RuntimeError:
+        #     # 回退：用位置步近似速度
+        #     dt_fallback = getattr(self, "dt", getattr(self, "sim_params", None).dt if hasattr(self, "sim_params") else 0.02)
+        #     dq = (self.ik_upper_q - prev_q) / dt_fallback
 
-        dq = torch.nan_to_num(dq, nan=0.0, posinf=0.0, neginf=0.0)
-        dq = torch.clamp(dq, -2.0, 2.0)
-        self.ik_upper_dq = dq  # 直接存储期望/解析得到的关节速度
+        # dq = torch.nan_to_num(dq, nan=0.0, posinf=0.0, neginf=0.0)
+        # dq = torch.clamp(dq, -2.0, 2.0)
+        # self.ik_upper_dq = dq  # 直接存储期望/解析得到的关节速度
 
         # ===== 加关节限幅 (Clamp joint limits) =====
         # 仅当父类已提供上下限张量 (dof_pos_limits_lower / upper) 时执行
@@ -348,14 +465,14 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         self.ik_upper_q = torch.max(torch.min(self.ik_upper_q, hard_upper), hard_lower)
         # ==========================================
         # self.ik_upper_q = self.default_dof_pos[:, self.upper_joint_indices].clone()
-        # self.ik_upper_dq = torch.zeros_like(self.ik_upper_q)
+        self.ik_upper_dq = torch.zeros_like(self.ik_upper_q)
         # print("ik_upper_q:", self.ik_upper_q)
         # print("ik_upper_dq:", self.ik_upper_dq)
         # print("self.ref_upper_dof_pos:", self.ref_upper_dof_pos)
 
-        self.ref_upper_dof_pos = self.ik_upper_q
-        self.ref_upper_dof_vel = self.ik_upper_dq
-    
+        self.ref_upper_dof_pos = self.ik_upper_q.clone()
+        self.ref_upper_dof_vel = self.ik_upper_dq.clone()
+
     def _compute_extend_jacobians(self):
         jac_all = self.simulator.jacobian            # (E, num_bodies, 6, num_dofs)
         # parent body indices (tensor Long)
@@ -579,7 +696,7 @@ class LeggedRobotDecoupledLocomotionWithFACET(LeggedRobotDecoupledLocomotionStan
         ref_ee_acc_w = (
             self.ee_lin_kp.unsqueeze(1) * (setpos_w - self.ref_ee_pos) +
             self.ee_lin_kd.unsqueeze(1) * (self.set_ee_linvel.unsqueeze(1) - self.ref_ee_lin_vel)
-            # + saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
+            + saturate(self.ee_force_ext_w, self.force_saturate).unsqueeze(1)
         ) / self.ee_virtual_mass_tensor.unsqueeze(1)
 
         ee_max_acc_tensor = torch.tensor(self.ee_max_acc, device=self.device)  # (3,)
