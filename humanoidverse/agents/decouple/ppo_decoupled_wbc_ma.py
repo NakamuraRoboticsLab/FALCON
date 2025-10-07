@@ -626,24 +626,21 @@ class PPOMultiActorCritic(PPO):
             upper_body_dofs_error =  torch.sum(torch.square(upper_body_pos - self.env.ref_upper_dof_pos), dim=1)
 
             # only log the first hand (left hand)
+            # 获取 torso link 的四元数 (num_envs, 4)
+            torso_quat = self.env.simulator._rigid_body_rot[:, self.env.torso_index, :]
             act_ext = self.env.marker_coords[:, -4, :3]  # (num_envs, 4, 3)
+            act_ext = quat_rotate_inverse(
+                torso_quat,  # shape (1, 4)
+                act_ext  # shape (1, 3)
+            )
             # self.ref_ext = self.env.ref_body_pos_extend[:, -4, :3]
             if step <= start_state_log:
                 self.ref_ext = self.env.marker_coords[:, -4, :3].clone()
-            hand_pos_error = self.ref_ext - act_ext
-
-            # 获取 torso link 的四元数 (num_envs, 4)
-            torso_quat = self.env.simulator._rigid_body_rot[:, self.env.torso_index, :]
-
-            # 先将 hand_pos_error 从世界系平移到 torso 原点
-            # 假设 hand_pos_error 是 (num_envs, 4, 3)，不需要补齐
-            hand_pos_error_3d = hand_pos_error
-
-            # 变换到 torso-link 坐标系
-            hand_pos_error_torso = quat_rotate_inverse(
+                self.ref_ext = quat_rotate_inverse(
                 torso_quat,  # shape (1, 4)
-                hand_pos_error_3d  # shape (1, 3)
+                self.ref_ext  # shape (1, 3)
             )
+            hand_pos_error_torso = self.ref_ext - act_ext
 
             if step <= start_state_log:
                 base_quat = self.env.simulator.robot_root_states[:, 3:7]  # (num_envs, 4)
