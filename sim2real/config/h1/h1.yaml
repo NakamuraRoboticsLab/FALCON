@@ -40,7 +40,7 @@ VISUALIZE_PIN: False
 VISUALIZE_FORCES: False
 
 residual_upper_body_action: True # in current case, always True
-use_upper_body_controller: False
+use_upper_body_controller: True # Whether to use upper body controller
 
 GAIT_PERIOD: 0.8
 DESIRED_BASE_HEIGHT: 0.9

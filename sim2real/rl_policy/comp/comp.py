@@ -25,7 +25,7 @@ class CompPolicy(LocoManipPolicy):
     ):
         super().__init__(config, model_path, rl_rate, policy_action_scale)
 
-        self.arm_ik = H1_ArmIK(robot_config=config, unit_test=False, visualization=False)
+        # self.arm_ik = H1_ArmIK(robot_config=config, unit_test=False, visualization=False)
         self.torque_log = []  # 新增：用于记录实际测量力矩
         self.base_vel_log = []  # 实测base线速度
         self.target_vel_log = []  # 目标线速度命令
@@ -40,6 +40,51 @@ class CompPolicy(LocoManipPolicy):
         self.start_record_time = None
         self.record_delay = 10.0  # 10秒后开始记录
         self.record_duration = 10.0  # 记录10秒的数据
+
+        self.upper_body_controller = None
+        if self.config.get("use_upper_body_controller", False):
+            self.init_upper_body_controller()
+
+    def init_upper_body_controller(self):
+        if self.config["ROBOT_TYPE"] == "h1":
+            self.upper_body_controller = H1_ArmIK(
+                unit_test=False, visualization=False, robot_config=self.config
+            )
+        else:
+            self.logger.error("Unsupported robot type: %s", self.config["ROBOT_TYPE"])
+        self.waypoint_index = 0
+        self.speed_factor = 0.05
+        self.base_z_offset = 0.8
+        # Initialize waypoints
+        self.degrees = -0
+        self.theta = np.radians(self.degrees)
+        self.EE_left_R = np.array(
+            [
+                [np.cos(-self.theta), -np.sin(-self.theta), 0],
+                [np.sin(-self.theta), np.cos(-self.theta), 0],
+                [0, 0, 1],
+            ]
+        )
+        self.EE_right_R = np.array(
+            [[np.cos(self.theta), -np.sin(self.theta), 0], [np.sin(self.theta), np.cos(self.theta), 0], [0, 0, 1]]
+        )
+        self.EE_left_x = 0.30
+        self.EE_right_x = 0.30
+        self.EE_left_y = 0.13
+        self.EE_right_y = -0.13
+        self.EE_left_z = 0.08
+        self.EE_right_z = 0.08
+        self.update_waypoints()
+        # Initialize external force
+        self.EE_efrc_L = np.array([0, 0, 0, 0, 0, 0])
+        self.EE_efrc_R = np.array([0, 0, 0, 0, 0, 0])
+        # Initialize interpolated positions and orientations
+        self.upper_body_controller.set_initial_poses(
+            self.waypoints_left[0].translation,
+            self.waypoints_right[0].translation,
+            self.waypoints_left[0].rotation,
+            self.waypoints_right[0].rotation,
+        )
 
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
@@ -68,13 +113,31 @@ class CompPolicy(LocoManipPolicy):
 
         current_time = time.time()
 
-        # Manually set shoulder joints
-        shoulder_joint_indices = [11, 15]
-        for idx in shoulder_joint_indices:
-            self.ref_upper_dof_pos[0, idx - 11] = -0.5
-        elbow_joint_indices = [14, 18]
-        for idx in elbow_joint_indices:
-            self.ref_upper_dof_pos[0, idx - 11] = 0.5
+        # # Manually set shoulder joints
+        # shoulder_joint_indices = [11, 15]
+        # for idx in shoulder_joint_indices:
+        #     self.ref_upper_dof_pos[0, idx - 11] = -0.5
+        # elbow_joint_indices = [14, 18]
+        # for idx in elbow_joint_indices:
+        #     self.ref_upper_dof_pos[0, idx - 11] = 0.5
+
+        # using IK to get upper body joint angles
+        # Apply upper body controller
+        if self.upper_body_controller:
+            # Control upper qpos and tau
+            upper_body_qpos, _ = self.upper_body_controller.get_q_tau(
+                self.waypoints_left[0],
+                self.waypoints_right[0],
+                self.EE_efrc_L,
+                self.EE_efrc_R,
+            )
+            # arm_reduced_joint_indices = [0, 1, 2, 3, 7, 8, 9, 10]
+            # for i, idx in enumerate(arm_reduced_joint_indices):
+            #     self.ref_upper_dof_pos[0, idx] = upper_body_qpos[i]
+            # # Zero out wrist joints
+            # wrist_joint_indices = [19, 20, 21, 26, 27, 28]
+            # for idx in wrist_joint_indices:
+            #     self.ref_upper_dof_pos[0, idx - 15] = 0.0
 
         # print("ref upper body pos:", self.ref_upper_dof_pos)
 
@@ -105,9 +168,6 @@ class CompPolicy(LocoManipPolicy):
         # === PD control for tau ===
         # 当前upper_body关节位置和速度
         q_cur = robot_state_data[0, 7 : 7 + self.num_dofs][self.upper_dof_indices] # 
-        # dq_cur = robot_state_data[0, 13 + self.num_dofs : 13 + 2 * self.num_dofs]
-        # print("target upper body pos:", q_target[0][self.upper_dof_indices])
-        # print("current upper body pos:", q_cur)
 
         # PD参数（可根据实际机器人调整）
         kp = np.ones(q_cur.shape) * 100.0
@@ -118,14 +178,14 @@ class CompPolicy(LocoManipPolicy):
 
         # 计算力矩
         q_target_up = q_target[0][self.upper_dof_indices]
-        calc_tau_pd = kp * (q_target_up - q_cur)
+        calc_tau_pd = kp * (q_target_up - q_cur) # for comparison
         calc_tau = mat_stiff @ (q_target_up - q_cur)
 
         # 上半身重力补偿
         # 只用上半身关节，速度和加速度都为0
         grav_tau_full = pin.rnea(
-            self.arm_ik.reduced_model,
-            self.arm_ik.reduced_data,
+            self.upper_body_controller.reduced_model,
+            self.upper_body_controller.reduced_data,
             q_cur,
             np.zeros_like(q_cur),
             np.zeros_like(q_cur)
@@ -178,9 +238,9 @@ class CompPolicy(LocoManipPolicy):
 
         """Compute the RVC stiffness matrix based on the current robot state."""
         # 使用 H1_ArmIK 的 reduced_model 和 reduced_data
-        # 假设 self.arm_ik 已在 __init__ 初始化为 H1_ArmIK 实例
-        model = self.arm_ik.reduced_model
-        data = self.arm_ik.reduced_data
+        # 假设 self.upper_body_controller 已在 __init__ 初始化为 H1_ArmIK 实例
+        model = self.upper_body_controller.reduced_model
+        data = self.upper_body_controller.reduced_data
 
         # 获取 torso link 和末端 frame 的 id
         # torso_frame_name = "torso_link"  # 请替换为你模型实际的 torso link 名称

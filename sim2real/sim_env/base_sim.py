@@ -26,11 +26,11 @@ import yaml
 from loguru import logger
 from loop_rate_limiters import RateLimiter
 
-import imageio
-import matplotlib
-if HEADLESS:
-    matplotlib.use("Agg")  # no GUI backend
-import matplotlib.pyplot as plt
+# import imageio
+# import matplotlib
+# if HEADLESS:
+#     matplotlib.use("Agg")  # no GUI backend
+# import matplotlib.pyplot as plt
 
 sys.path.append("../")
 
